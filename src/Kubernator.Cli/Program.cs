@@ -45,8 +45,17 @@ app.Configure(config =>
         .WithExample("bundle", "./publish", "--namespace", "prod", "--replicas", "3");
 
     config.AddCommand<VerifyCommand>("verify")
-        .WithDescription("Verify the integrity of a .kubpack bundle.")
-        .WithExample("verify", "./out/myapp.kubpack");
+        .WithDescription("Verify the integrity (and optional cosign signature) of a .kubpack bundle.")
+        .WithExample("verify", "./out/myapp.kubpack")
+        .WithExample("verify", "./out/myapp.kubpack", "--require-signature");
+
+    config.AddCommand<KeygenCommand>("keygen")
+        .WithDescription("Generate a cosign-compatible ECDSA P-256 key pair.")
+        .WithExample("keygen", "-o", "./keys");
+
+    config.AddCommand<SignCommand>("sign")
+        .WithDescription("Sign a bundle with a private key, producing a detached cosign-compatible signature.")
+        .WithExample("sign", "./out/myapp.kubpack", "--key", "./keys/cosign.key");
 
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")

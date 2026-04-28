@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Kubernator.Core.Packaging;
+using Kubernator.Core.Packaging.Signing;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -8,10 +9,12 @@ namespace Kubernator.Cli.Commands;
 internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
 {
     private readonly IBundleService bundleService;
+    private readonly ICosignSigner signer;
 
-    public VerifyCommand(IBundleService bundleService)
+    public VerifyCommand(IBundleService bundleService, ICosignSigner signer)
     {
         this.bundleService = bundleService;
+        this.signer = signer;
     }
 
     public sealed class Settings : CommandSettings
@@ -19,6 +22,18 @@ internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
         [CommandArgument(0, "<bundle>")]
         [Description("Path to a .kubpack bundle to verify.")]
         public string Bundle { get; init; } = string.Empty;
+
+        [CommandOption("--signature <path>")]
+        [Description("Detached signature path (default: <bundle>.sig if present).")]
+        public string? SignaturePath { get; init; }
+
+        [CommandOption("--pubkey <path>")]
+        [Description("Public key path (default: <bundle>.pub or cosign.pub next to bundle).")]
+        public string? PublicKeyPath { get; init; }
+
+        [CommandOption("--require-signature")]
+        [Description("Fail if no signature is present alongside the bundle.")]
+        public bool RequireSignature { get; init; }
 
         public override ValidationResult Validate()
         {
@@ -47,16 +62,40 @@ internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
             AnsiConsole.MarkupLine($"[green]files[/]     {result.Manifest.Files.Count}");
         }
 
-        if (result.Ok)
+        var integrityOk = result.Ok;
+        if (!integrityOk)
         {
-            AnsiConsole.MarkupLine("[green]bundle integrity OK[/]");
+            foreach (var err in result.Errors)
+            {
+                AnsiConsole.MarkupLine($"[red]![/]  {Markup.Escape(err)}");
+            }
+            return 5;
+        }
+        AnsiConsole.MarkupLine("[green]integrity OK[/]");
+
+        var sigPath = settings.SignaturePath ?? path + ".sig";
+        var pubPath = settings.PublicKeyPath
+            ?? (File.Exists(path + ".pub") ? path + ".pub"
+                : System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path) ?? ".", "cosign.pub"));
+
+        if (!File.Exists(sigPath) || !File.Exists(pubPath))
+        {
+            if (settings.RequireSignature)
+            {
+                AnsiConsole.MarkupLine("[red]signature required but missing[/]");
+                return 5;
+            }
+            AnsiConsole.MarkupLine("[grey]signature not present (skipped); use --require-signature to enforce[/]");
             return 0;
         }
 
-        foreach (var err in result.Errors)
+        var sigResult = await signer.VerifyBlobAsync(path, sigPath, pubPath);
+        if (sigResult.Valid)
         {
-            AnsiConsole.MarkupLine($"[red]![/]  {Markup.Escape(err)}");
+            AnsiConsole.MarkupLine($"[green]signature OK[/]  ({Markup.Escape(System.IO.Path.GetFileName(pubPath))})");
+            return 0;
         }
+        AnsiConsole.MarkupLine($"[red]signature invalid:[/] {Markup.Escape(sigResult.Error ?? "unknown error")}");
         return 5;
     }
 }

@@ -15,6 +15,7 @@ using Kubernator.Core.Detection.Python;
 using Kubernator.Core.Detection.Static;
 using Kubernator.Core.Generation;
 using Kubernator.Core.Packaging;
+using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Strategy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -44,6 +45,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IStrategySelector, StrategySelector>();
         services.TryAddSingleton<IGenerationService, GenerationService>();
         services.TryAddSingleton<IBundleService, BundleService>();
+        services.TryAddSingleton<ICosignSigner, CosignSigner>();
 
         return services;
     }
