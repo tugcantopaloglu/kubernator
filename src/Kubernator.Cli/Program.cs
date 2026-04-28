@@ -57,6 +57,11 @@ app.Configure(config =>
         .WithDescription("Sign a bundle with a private key, producing a detached cosign-compatible signature.")
         .WithExample("sign", "./out/myapp.kubpack", "--key", "./keys/cosign.key");
 
+    config.AddCommand<PipelineCommand>("pipeline")
+        .WithDescription("Generate a CI/CD pipeline (GitHub Actions, GitLab CI, Azure DevOps, or Tekton).")
+        .WithExample("pipeline", "./publish", "--target", "gh-actions")
+        .WithExample("pipeline", "./publish", "--target", "tekton", "-o", ".");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");
