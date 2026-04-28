@@ -1,4 +1,5 @@
 using Docker.DotNet;
+using Kubernator.Core.Containers;
 
 namespace Kubernator.Runtime.Docker;
 

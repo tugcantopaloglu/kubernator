@@ -39,6 +39,15 @@ app.Configure(config =>
         .WithExample("build", "./publish")
         .WithExample("build", "./publish", "--name", "myapp", "--tag", "1.0.0");
 
+    config.AddCommand<BundleCommand>("bundle")
+        .WithDescription("Build the image and pack everything into an air-gapped .kubpack bundle.")
+        .WithExample("bundle", "./publish", "-o", "./out/myapp.kubpack")
+        .WithExample("bundle", "./publish", "--namespace", "prod", "--replicas", "3");
+
+    config.AddCommand<VerifyCommand>("verify")
+        .WithDescription("Verify the integrity of a .kubpack bundle.")
+        .WithExample("verify", "./out/myapp.kubpack");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");

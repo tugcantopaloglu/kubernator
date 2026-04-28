@@ -1,3 +1,4 @@
+using Kubernator.Core.Containers;
 using Kubernator.Runtime.Docker;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;

@@ -1,4 +1,4 @@
-namespace Kubernator.Runtime;
+namespace Kubernator.Core.Containers;
 
 public sealed record BuildContext
 {

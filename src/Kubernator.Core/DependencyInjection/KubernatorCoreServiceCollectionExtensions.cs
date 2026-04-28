@@ -4,6 +4,7 @@ using Kubernator.Core.Analysis.DotNet;
 using Kubernator.Core.Detection;
 using Kubernator.Core.Detection.DotNet;
 using Kubernator.Core.Generation;
+using Kubernator.Core.Packaging;
 using Kubernator.Core.Strategy;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -21,6 +22,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IAnalysisService, AnalysisService>();
         services.TryAddSingleton<IStrategySelector, StrategySelector>();
         services.TryAddSingleton<IGenerationService, GenerationService>();
+        services.TryAddSingleton<IBundleService, BundleService>();
 
         return services;
     }

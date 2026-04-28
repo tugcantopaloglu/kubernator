@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using Docker.DotNet;
 using Docker.DotNet.Models;
+using Kubernator.Core.Containers;
 
 namespace Kubernator.Runtime.Docker;
 
