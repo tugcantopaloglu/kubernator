@@ -1,6 +1,7 @@
 using Kubernator.Cli.Commands;
 using Kubernator.Cli.Infrastructure;
 using Kubernator.Core.DependencyInjection;
+using Kubernator.Runtime.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Spectre.Console.Cli;
@@ -12,6 +13,7 @@ services.AddLogging(b =>
     b.AddProvider(new SpectreLoggerProvider());
 });
 services.AddKubernatorCore();
+services.AddKubernatorRuntime();
 
 var registrar = new TypeRegistrar(services);
 var app = new CommandApp(registrar);
@@ -26,6 +28,16 @@ app.Configure(config =>
         .WithDescription("Detect application type and report runtime, dependencies, and network surface.")
         .WithExample("analyze", "./publish")
         .WithExample("analyze", "./publish", "--json");
+
+    config.AddCommand<GenerateCommand>("generate")
+        .WithDescription("Generate Dockerfile, .dockerignore, and Kubernetes manifests for the application.")
+        .WithExample("generate", "./publish")
+        .WithExample("generate", "./publish", "--namespace", "myapp", "--replicas", "3");
+
+    config.AddCommand<BuildCommand>("build")
+        .WithDescription("Generate files and build the container image via Docker or compatible engine.")
+        .WithExample("build", "./publish")
+        .WithExample("build", "./publish", "--name", "myapp", "--tag", "1.0.0");
 
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
