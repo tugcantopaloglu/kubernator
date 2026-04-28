@@ -1,8 +1,18 @@
 using Kubernator.Core.Abstractions;
 using Kubernator.Core.Analysis;
 using Kubernator.Core.Analysis.DotNet;
+using Kubernator.Core.Analysis.Go;
+using Kubernator.Core.Analysis.Java;
+using Kubernator.Core.Analysis.Node;
+using Kubernator.Core.Analysis.Python;
+using Kubernator.Core.Analysis.Static;
 using Kubernator.Core.Detection;
 using Kubernator.Core.Detection.DotNet;
+using Kubernator.Core.Detection.Go;
+using Kubernator.Core.Detection.Java;
+using Kubernator.Core.Detection.Node;
+using Kubernator.Core.Detection.Python;
+using Kubernator.Core.Detection.Static;
 using Kubernator.Core.Generation;
 using Kubernator.Core.Packaging;
 using Kubernator.Core.Strategy;
@@ -16,7 +26,18 @@ public static class KubernatorCoreServiceCollectionExtensions
     public static IServiceCollection AddKubernatorCore(this IServiceCollection services)
     {
         services.AddTransient<IAppDetector, DotNetDetector>();
+        services.AddTransient<IAppDetector, NodeDetector>();
+        services.AddTransient<IAppDetector, JavaDetector>();
+        services.AddTransient<IAppDetector, PythonDetector>();
+        services.AddTransient<IAppDetector, GoDetector>();
+        services.AddTransient<IAppDetector, StaticWebDetector>();
+
         services.AddTransient<IAppAnalyzer, DotNetAnalyzer>();
+        services.AddTransient<IAppAnalyzer, NodeAnalyzer>();
+        services.AddTransient<IAppAnalyzer, JavaAnalyzer>();
+        services.AddTransient<IAppAnalyzer, PythonAnalyzer>();
+        services.AddTransient<IAppAnalyzer, GoAnalyzer>();
+        services.AddTransient<IAppAnalyzer, StaticWebAnalyzer>();
 
         services.TryAddSingleton<IDetectionService, DetectionService>();
         services.TryAddSingleton<IAnalysisService, AnalysisService>();

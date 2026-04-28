@@ -14,12 +14,12 @@ public sealed class StrategySelector : IStrategySelector
 
         var imageName = options?.ImageName ?? DeriveImageName(app);
         var imageTag = options?.ImageTag ?? DeriveImageTag(app);
-        var workdir = options?.WorkingDirectory ?? "/app";
+        var workdir = options?.WorkingDirectory ?? DefaultWorkingDirectory(app.Kind);
 
         var ports = new List<int>(app.Network.Ports);
         var envBuilder = new Dictionary<string, string>(app.EnvironmentHints, StringComparer.Ordinal);
 
-        if (app.Network.RequiresIngress)
+        if (app.Kind == AppKind.DotNet && app.Network.RequiresIngress)
         {
             envBuilder["ASPNETCORE_FORWARDEDHEADERS_ENABLED"] = "true";
         }
@@ -52,6 +52,29 @@ public sealed class StrategySelector : IStrategySelector
     }
 
     private static (string Command, IReadOnlyList<string> Arguments) ResolveEntrypoint(AppDescriptor app, string workdir)
+    {
+        if (app.Kind == AppKind.DotNet)
+        {
+            return ResolveDotNetEntrypoint(app, workdir);
+        }
+
+        if (app.EntryPoint is null)
+        {
+            return (app.Kind switch
+            {
+                AppKind.NodeJs => "node",
+                AppKind.Python => "python",
+                AppKind.Java => "java",
+                AppKind.Go => $"{workdir}/app",
+                AppKind.StaticWeb => "nginx",
+                _ => "sh"
+            }, []);
+        }
+
+        return (app.EntryPoint.StartupCommand ?? "sh", app.EntryPoint.Arguments);
+    }
+
+    private static (string Command, IReadOnlyList<string> Arguments) ResolveDotNetEntrypoint(AppDescriptor app, string workdir)
     {
         if (app.EntryPoint is null)
         {
@@ -95,8 +118,32 @@ public sealed class StrategySelector : IStrategySelector
 
     private static string DeriveImageTag(AppDescriptor app)
     {
-        return app.Runtime.Version ?? "0.1.0";
+        var raw = app.Runtime.Version;
+        if (string.IsNullOrEmpty(raw))
+        {
+            return "0.1.0";
+        }
+        var sanitized = SanitizeImageTag(raw);
+        return string.IsNullOrEmpty(sanitized) ? "0.1.0" : sanitized;
     }
+
+    private static string SanitizeImageTag(string raw)
+    {
+        var chars = raw.Select(c =>
+            char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' ? c : '-').ToArray();
+        var tag = new string(chars).TrimStart('.', '-').Trim();
+        if (tag.Length > 128)
+        {
+            tag = tag[..128];
+        }
+        return tag.TrimEnd('.', '-');
+    }
+
+    private static string DefaultWorkingDirectory(AppKind kind) => kind switch
+    {
+        AppKind.StaticWeb => "/usr/share/nginx/html",
+        _ => "/app"
+    };
 
     private static string SanitizeImageName(string raw)
     {

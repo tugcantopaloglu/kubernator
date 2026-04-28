@@ -9,6 +9,17 @@ internal static class BaseImageCatalog
         return app.Kind switch
         {
             AppKind.DotNet => SelectForDotNet(app),
+            AppKind.NodeJs => Chainguard("chainguard/node", $"Node.js {app.Runtime.Tfm ?? "lts"}",
+                "Chainguard signed Node.js image; non-root UID 65532; minimal CVE surface."),
+            AppKind.Python => Chainguard("chainguard/python", "Python (chainguard)",
+                "Chainguard signed Python image; non-root UID 65532."),
+            AppKind.Java => Chainguard("chainguard/jre", "Java JRE (chainguard)",
+                "Chainguard signed Temurin-based JRE; non-root UID 65532."),
+            AppKind.Go => Chainguard("chainguard/static", "Static (chainguard)",
+                "Chainguard scratch-like image with ca-certificates and tzdata for static Go binaries.",
+                tag: "latest-glibc"),
+            AppKind.StaticWeb => Chainguard("chainguard/nginx", "nginx (chainguard)",
+                "Chainguard signed nginx; non-root UID 65532; serves /usr/share/nginx/html."),
             _ => throw new NotSupportedException($"No base image strategy for {app.Kind}")
         };
     }
@@ -74,6 +85,23 @@ internal static class BaseImageCatalog
             DefaultUserId = 1654,
             DefaultGroupId = 1654,
             Notes = "Microsoft chiseled Ubuntu runtime image; non-root UID 1654; no shell, no package manager."
+        };
+    }
+
+    private static BaseImage Chainguard(string repository, string displayName, string notes, string tag = "latest")
+    {
+        return new BaseImage
+        {
+            Registry = AllowedRegistries.Chainguard,
+            Repository = repository,
+            Tag = tag,
+            DisplayName = displayName,
+            NonRootByDefault = true,
+            RootlessSupportsExec = false,
+            HasShell = false,
+            DefaultUserId = 65532,
+            DefaultGroupId = 65532,
+            Notes = notes
         };
     }
 
