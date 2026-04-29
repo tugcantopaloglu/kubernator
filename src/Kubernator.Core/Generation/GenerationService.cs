@@ -1,5 +1,6 @@
 using Kubernator.Core.Generation.Emitters;
 using Kubernator.Core.Strategy;
+using Kubernator.Core.Tls;
 
 namespace Kubernator.Core.Generation;
 
@@ -37,11 +38,70 @@ public sealed class GenerationService : IGenerationService
         await WriteAsync(options, Path.Combine(manifestsDir, "networkpolicy.yaml"),
             KubernetesEmitter.NetworkPolicy(plan, name, ns), written, ct);
 
+        if (plan.Exposure is not null)
+        {
+            await WriteExposureAsync(plan, options, manifestsDir, name, ns, written, ct);
+        }
+
         return new GenerationResult
         {
             OutputDirectory = options.OutputDirectory,
             WrittenFiles = written
         };
+    }
+
+    private static async Task WriteExposureAsync(
+        BuildPlan plan,
+        GenerationOptions options,
+        string manifestsDir,
+        string name,
+        string ns,
+        List<string> written,
+        CancellationToken ct)
+    {
+        var exposure = plan.Exposure!;
+
+        var ingress = IngressEmitter.Ingress(plan, name, ns);
+        await WriteAsync(options, Path.Combine(manifestsDir, "ingress.yaml"), ingress, written, ct);
+
+        switch (exposure.TlsMode)
+        {
+            case TlsMode.None:
+                return;
+
+            case TlsMode.SelfSigned:
+                {
+                    var material = SelfSignedCertificateGenerator.Generate(
+                        exposure.PrimaryHostname,
+                        exposure.AdditionalHostnames);
+                    var secret = IngressEmitter.TlsSecret(exposure.TlsSecretName, ns, material.CertificatePem, material.PrivateKeyPem);
+                    await WriteAsync(options, Path.Combine(manifestsDir, "tls-secret.yaml"), secret, written, ct);
+                    break;
+                }
+
+            case TlsMode.UserProvided:
+                {
+                    if (string.IsNullOrEmpty(exposure.UserCertificatePemPath) ||
+                        string.IsNullOrEmpty(exposure.UserPrivateKeyPemPath))
+                    {
+                        throw new InvalidOperationException(
+                            "TlsMode.UserProvided requires UserCertificatePemPath and UserPrivateKeyPemPath");
+                    }
+                    var material = SelfSignedCertificateGenerator.LoadFromFiles(
+                        exposure.UserCertificatePemPath,
+                        exposure.UserPrivateKeyPemPath);
+                    var secret = IngressEmitter.TlsSecret(exposure.TlsSecretName, ns, material.CertificatePem, material.PrivateKeyPem);
+                    await WriteAsync(options, Path.Combine(manifestsDir, "tls-secret.yaml"), secret, written, ct);
+                    break;
+                }
+
+            case TlsMode.CertManager:
+                {
+                    var cert = IngressEmitter.CertManagerCertificate(plan, name, ns);
+                    await WriteAsync(options, Path.Combine(manifestsDir, "certificate.yaml"), cert, written, ct);
+                    break;
+                }
+        }
     }
 
     private static async Task WriteAsync(

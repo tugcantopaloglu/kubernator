@@ -47,6 +47,7 @@ public sealed class StrategySelector : IStrategySelector
                 RunAsUser = baseImage.DefaultUserId,
                 RunAsGroup = baseImage.DefaultGroupId
             },
+            Exposure = options?.Exposure,
             Notes = baseImage.Notes is null ? [] : [baseImage.Notes]
         };
     }

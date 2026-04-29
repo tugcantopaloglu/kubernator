@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Kubernator.Cli.Infrastructure;
 using Kubernator.Core.Abstractions;
 using Kubernator.Core.Generation;
 using Kubernator.Core.Strategy;
@@ -53,6 +54,50 @@ internal sealed class GenerateCommand : AsyncCommand<GenerateCommand.Settings>
         [Description("Do not overwrite existing generated files.")]
         public bool NoOverwrite { get; init; }
 
+        [CommandOption("--hostname <host>")]
+        [Description("Primary public hostname (enables Ingress generation).")]
+        public string? Hostname { get; init; }
+
+        [CommandOption("--extra-host <host>")]
+        [Description("Additional hostname (repeatable).")]
+        public string[]? ExtraHosts { get; init; }
+
+        [CommandOption("--tls <mode>")]
+        [Description("TLS mode: none | self-signed | cert-manager | user (default: self-signed when --hostname is set).")]
+        public string? Tls { get; init; }
+
+        [CommandOption("--ingress-class <name>")]
+        public string? IngressClass { get; init; }
+
+        [CommandOption("--tls-secret <name>")]
+        public string? TlsSecretName { get; init; }
+
+        [CommandOption("--cert-issuer <name>")]
+        [Description("cert-manager Issuer/ClusterIssuer name.")]
+        public string? CertIssuer { get; init; }
+
+        [CommandOption("--issuer-kind <kind>")]
+        [Description("ClusterIssuer (default) or Issuer.")]
+        public string? IssuerKind { get; init; }
+
+        [CommandOption("--cert-file <path>")]
+        [Description("PEM certificate file (required with --tls user).")]
+        public string? CertFile { get; init; }
+
+        [CommandOption("--key-file <path>")]
+        [Description("PEM private key file (required with --tls user).")]
+        public string? KeyFile { get; init; }
+
+        [CommandOption("--path <path>")]
+        public string? IngressPath { get; init; }
+
+        [CommandOption("--no-https-redirect")]
+        public bool NoHttpsRedirect { get; init; }
+
+        [CommandOption("--tls-port <port>")]
+        [Description("Override the backend service port that the Ingress points at.")]
+        public int? TlsPort { get; init; }
+
         public override ValidationResult Validate()
         {
             if (string.IsNullOrWhiteSpace(Path))
@@ -71,10 +116,34 @@ internal sealed class GenerateCommand : AsyncCommand<GenerateCommand.Settings>
             .Spinner(Spinner.Known.Dots)
             .StartAsync($"Analyzing [cyan]{Markup.Escape(path)}[/]", async _ => await analysis.AnalyzeAsync(path));
 
+        ExposureOptions? exposure;
+        try
+        {
+            exposure = ExposureBuilder.Build(
+                settings.Hostname,
+                settings.ExtraHosts,
+                settings.Tls,
+                settings.IngressClass,
+                settings.TlsSecretName,
+                settings.CertIssuer,
+                settings.IssuerKind,
+                settings.CertFile,
+                settings.KeyFile,
+                settings.IngressPath,
+                settings.NoHttpsRedirect,
+                settings.TlsPort);
+        }
+        catch (InvalidOperationException ex)
+        {
+            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            return 11;
+        }
+
         var plan = strategy.Plan(descriptor, new StrategyOptions
         {
             ImageName = settings.ImageName,
-            ImageTag = settings.ImageTag
+            ImageTag = settings.ImageTag,
+            Exposure = exposure
         });
 
         var output = settings.OutputDirectory ?? System.IO.Path.Combine(path, ".kubernator");
