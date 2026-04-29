@@ -42,12 +42,14 @@ internal static class IngressEmitter
             w.Indent();
             w.Line("- hosts:");
             w.Indent();
+            w.Indent();
             foreach (var host in exposure.AllHostnames)
             {
                 w.Line($"- {YamlValue.String(host)}");
             }
             w.Outdent();
             w.Line($"secretName: {YamlValue.String(exposure.TlsSecretName)}");
+            w.Outdent();
             w.Outdent();
         }
         w.Line("rules:");

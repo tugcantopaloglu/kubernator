@@ -11,6 +11,7 @@ using Kubernator.Core.Packaging.Hashing;
 using Kubernator.Core.Packaging.Sbom;
 using Kubernator.Core.Packaging.Scripts;
 using Kubernator.Core.Strategy;
+using Kubernator.Core.Tls;
 
 namespace Kubernator.Core.Packaging;
 
@@ -333,6 +334,50 @@ public sealed class BundleService : IBundleService
         var policyPath = Path.Combine(manifestsDir, "networkpolicy.yaml");
         File.WriteAllText(policyPath, policy);
         written.Add(policyPath);
+
+        if (plan.Exposure is not null)
+        {
+            var ingressPath = Path.Combine(manifestsDir, "ingress.yaml");
+            File.WriteAllText(ingressPath, IngressEmitter.Ingress(plan, name, ns));
+            written.Add(ingressPath);
+
+            switch (plan.Exposure.TlsMode)
+            {
+                case TlsMode.SelfSigned:
+                    {
+                        var material = SelfSignedCertificateGenerator.Generate(
+                            plan.Exposure.PrimaryHostname,
+                            plan.Exposure.AdditionalHostnames);
+                        var secretPath = Path.Combine(manifestsDir, "tls-secret.yaml");
+                        File.WriteAllText(secretPath, IngressEmitter.TlsSecret(plan.Exposure.TlsSecretName, ns, material.CertificatePem, material.PrivateKeyPem));
+                        written.Add(secretPath);
+                        break;
+                    }
+                case TlsMode.UserProvided:
+                    {
+                        if (string.IsNullOrEmpty(plan.Exposure.UserCertificatePemPath) ||
+                            string.IsNullOrEmpty(plan.Exposure.UserPrivateKeyPemPath))
+                        {
+                            throw new InvalidOperationException(
+                                "TlsMode.UserProvided requires UserCertificatePemPath and UserPrivateKeyPemPath");
+                        }
+                        var material = SelfSignedCertificateGenerator.LoadFromFiles(
+                            plan.Exposure.UserCertificatePemPath,
+                            plan.Exposure.UserPrivateKeyPemPath);
+                        var secretPath = Path.Combine(manifestsDir, "tls-secret.yaml");
+                        File.WriteAllText(secretPath, IngressEmitter.TlsSecret(plan.Exposure.TlsSecretName, ns, material.CertificatePem, material.PrivateKeyPem));
+                        written.Add(secretPath);
+                        break;
+                    }
+                case TlsMode.CertManager:
+                    {
+                        var certPath = Path.Combine(manifestsDir, "certificate.yaml");
+                        File.WriteAllText(certPath, IngressEmitter.CertManagerCertificate(plan, name, ns));
+                        written.Add(certPath);
+                        break;
+                    }
+            }
+        }
 
         return written;
     }
