@@ -72,6 +72,11 @@ app.Configure(config =>
         .WithExample("kustomize", "./publish", "-o", "./kustomize")
         .WithExample("kustomize", "./publish", "--overlay", "production", "--overlay", "staging");
 
+    config.AddCommand<GitOpsCommand>("gitops")
+        .WithDescription("Generate Argo CD Application + AppProject CRs for GitOps continuous delivery.")
+        .WithExample("gitops", "./publish", "--repo-url", "https://git.example.com/org/repo")
+        .WithExample("gitops", "./publish", "--repo-url", "https://git.example.com/org/repo", "--source-kind", "helm", "--source-path", "charts/app");
+
     config.AddCommand<VulnDbCommand>("vulndb")
         .WithDescription("Manage the offline vulnerability database (status / update / import-zip / import / export).")
         .WithExample("vulndb", "update")

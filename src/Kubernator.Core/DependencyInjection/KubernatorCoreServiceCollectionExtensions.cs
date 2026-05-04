@@ -14,6 +14,7 @@ using Kubernator.Core.Detection.Node;
 using Kubernator.Core.Detection.Python;
 using Kubernator.Core.Detection.Static;
 using Kubernator.Core.Generation;
+using Kubernator.Core.GitOps;
 using Kubernator.Core.Helm;
 using Kubernator.Core.Kustomize;
 using Kubernator.Core.Packaging;
@@ -54,6 +55,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IPipelineService, PipelineService>();
         services.TryAddSingleton<IHelmService, HelmService>();
         services.TryAddSingleton<IKustomizeService, KustomizeService>();
+        services.TryAddSingleton<IGitOpsService, GitOpsService>();
         services.TryAddSingleton<IVulnerabilityDatabase>(_ => FileVulnerabilityDatabase.Default());
         services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();

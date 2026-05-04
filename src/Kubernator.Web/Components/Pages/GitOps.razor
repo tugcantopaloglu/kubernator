@@ -1,0 +1,170 @@
+@page "/gitops"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IGitOpsService GitOpsService
+
+<PageTitle>gitops · kubernator</PageTitle>
+
+<h1>GitOps</h1>
+<p class="subtitle">Generate Argo CD <code>Application</code> + <code>AppProject</code> CRs for continuous delivery.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="repo">Repo URL</label>
+        <InputText id="repo" @bind-Value="form.RepoUrl" placeholder="https://git.example.com/org/repo" />
+    </div>
+    <div class="form-row">
+        <label for="rev">Target revision</label>
+        <InputText id="rev" @bind-Value="form.TargetRevision" />
+        <label for="sourcePath">Source path</label>
+        <InputText id="sourcePath" @bind-Value="form.SourcePath" />
+    </div>
+    <div class="form-row">
+        <label for="kind">Source kind</label>
+        <InputSelect id="kind" @bind-Value="form.SourceKind">
+            <option value="directory">directory</option>
+            <option value="helm">helm</option>
+            <option value="kustomize">kustomize</option>
+        </InputSelect>
+        <label for="ns">Dest namespace</label>
+        <InputText id="ns" @bind-Value="form.DestinationNamespace" />
+    </div>
+    <div class="form-row">
+        <label for="argo">Argo namespace</label>
+        <InputText id="argo" @bind-Value="form.ArgoNamespace" />
+        <label for="server">Dest server</label>
+        <InputText id="server" @bind-Value="form.DestinationServer" />
+    </div>
+    <div class="form-row">
+        <label for="app">App name</label>
+        <InputText id="app" @bind-Value="form.AppName" placeholder="(auto)" />
+        <label for="proj">Project name</label>
+        <InputText id="proj" @bind-Value="form.ProjectName" placeholder="(auto)" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/argocd)" />
+    </div>
+    <div class="form-row">
+        <label for="auto">Automated sync</label>
+        <InputCheckbox id="auto" @bind-Value="form.AutomatedSync" />
+        <label for="heal">Self-heal</label>
+        <InputCheckbox id="heal" @bind-Value="form.SelfHeal" />
+        <label for="prune">Prune</label>
+        <InputCheckbox id="prune" @bind-Value="form.Prune" />
+        <label for="cns">Create namespace</label>
+        <InputCheckbox id="cns" @bind-Value="form.CreateNamespace" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <h2>generated files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(Environment.CurrentDirectory, f)</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string RepoUrl { get; set; } = string.Empty;
+        public string TargetRevision { get; set; } = "HEAD";
+        public string SourcePath { get; set; } = ".";
+        public string SourceKind { get; set; } = "directory";
+        public string DestinationNamespace { get; set; } = "default";
+        public string DestinationServer { get; set; } = "https://kubernetes.default.svc";
+        public string ArgoNamespace { get; set; } = "argocd";
+        public string? AppName { get; set; }
+        public string? ProjectName { get; set; }
+        public string? OutputDirectory { get; set; }
+        public bool AutomatedSync { get; set; } = true;
+        public bool SelfHeal { get; set; } = true;
+        public bool Prune { get; set; } = true;
+        public bool CreateNamespace { get; set; } = true;
+    }
+
+    private readonly Form form = new();
+    private GitOpsResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(form.RepoUrl))
+        {
+            error = "repo URL is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+            var plan = Strategy.Plan(descriptor);
+
+            var sourceKind = form.SourceKind switch
+            {
+                "helm" => GitOpsSourceKind.Helm,
+                "kustomize" => GitOpsSourceKind.Kustomize,
+                _ => GitOpsSourceKind.Directory
+            };
+
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? System.IO.Path.Combine(resolved, ".kubernator", "argocd")
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            result = await GitOpsService.GenerateAsync(plan, new GitOpsOptions
+            {
+                OutputDirectory = output,
+                RepoUrl = form.RepoUrl,
+                TargetRevision = form.TargetRevision,
+                SourcePath = form.SourcePath,
+                SourceKind = sourceKind,
+                DestinationServer = form.DestinationServer,
+                DestinationNamespace = form.DestinationNamespace,
+                ArgoNamespace = form.ArgoNamespace,
+                ApplicationName = string.IsNullOrWhiteSpace(form.AppName) ? null : form.AppName,
+                ProjectName = string.IsNullOrWhiteSpace(form.ProjectName) ? null : form.ProjectName,
+                AutomatedSync = form.AutomatedSync,
+                SelfHeal = form.SelfHeal,
+                Prune = form.Prune,
+                CreateNamespace = form.CreateNamespace
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -15,4 +15,5 @@ coverage/
 *.coveragexml
 .kubernator/
 *.kubpack
+tmp/
 .claude/settings.local.json
