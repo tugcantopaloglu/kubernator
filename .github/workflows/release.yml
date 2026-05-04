@@ -85,7 +85,7 @@ jobs:
             tar -C "$OUT" -czf "$NAME.tar.gz" "kubernator"
             FILE="$NAME.tar.gz"
           fi
-          SHA=$(shasum -a 256 "$FILE" | awk '{print $1}')
+          SHA=$(openssl dgst -sha256 "$FILE" | awk '{print $NF}')
           SIZE=$(wc -c < "$FILE" | tr -d ' ')
           echo "file=$FILE" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
@@ -175,7 +175,7 @@ jobs:
           mkdir -p assets
           find dist -maxdepth 2 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} assets/ \;
           cp release.json assets/
-          (cd assets && shasum -a 256 *.zip *.tar.gz 2>/dev/null > checksums.txt || true)
+          (cd assets && for f in *.zip *.tar.gz; do [ -f "$f" ] && echo "$(openssl dgst -sha256 "$f" | awk '{print $NF}')  $f"; done > checksums.txt)
           ls -la assets
 
       - name: create GitHub release
