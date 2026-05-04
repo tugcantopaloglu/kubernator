@@ -43,6 +43,20 @@ public sealed class GenerationService : IGenerationService
             await WriteExposureAsync(plan, options, manifestsDir, name, ns, written, ct);
         }
 
+        if (options.Scaling is { } scaling)
+        {
+            if (scaling.HpaEnabled)
+            {
+                await WriteAsync(options, Path.Combine(manifestsDir, "hpa.yaml"),
+                    AutoscalingEmitter.Hpa(name, ns, scaling), written, ct);
+            }
+            if (scaling.PdbEnabled)
+            {
+                await WriteAsync(options, Path.Combine(manifestsDir, "pdb.yaml"),
+                    AutoscalingEmitter.Pdb(name, ns, scaling), written, ct);
+            }
+        }
+
         return new GenerationResult
         {
             OutputDirectory = options.OutputDirectory,

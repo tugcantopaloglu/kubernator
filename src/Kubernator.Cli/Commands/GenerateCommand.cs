@@ -98,6 +98,33 @@ internal sealed class GenerateCommand : AsyncCommand<GenerateCommand.Settings>
         [Description("Override the backend service port that the Ingress points at.")]
         public int? TlsPort { get; init; }
 
+        [CommandOption("--hpa-min <n>")]
+        public int? HpaMin { get; init; }
+
+        [CommandOption("--hpa-max <n>")]
+        public int? HpaMax { get; init; }
+
+        [CommandOption("--hpa-cpu <pct>")]
+        [Description("HPA target average CPU utilization (percentage).")]
+        public int? HpaCpu { get; init; }
+
+        [CommandOption("--hpa-memory <pct>")]
+        [Description("HPA target average memory utilization (percentage).")]
+        public int? HpaMemory { get; init; }
+
+        [CommandOption("--pdb-min-available <n>")]
+        public int? PdbMinAvailable { get; init; }
+
+        [CommandOption("--pdb-max-unavailable <n>")]
+        public int? PdbMaxUnavailable { get; init; }
+
+        [CommandOption("--pdb-min-available-percent <pct>")]
+        [Description("E.g. 50% — exclusive with --pdb-min-available.")]
+        public string? PdbMinAvailablePercent { get; init; }
+
+        [CommandOption("--pdb-max-unavailable-percent <pct>")]
+        public string? PdbMaxUnavailablePercent { get; init; }
+
         public override ValidationResult Validate()
         {
             if (string.IsNullOrWhiteSpace(Path))
@@ -146,13 +173,24 @@ internal sealed class GenerateCommand : AsyncCommand<GenerateCommand.Settings>
             Exposure = exposure
         });
 
+        var scaling = ScalingBuilder.Build(
+            settings.HpaMin,
+            settings.HpaMax,
+            settings.HpaCpu,
+            settings.HpaMemory,
+            settings.PdbMinAvailable,
+            settings.PdbMaxUnavailable,
+            settings.PdbMinAvailablePercent,
+            settings.PdbMaxUnavailablePercent);
+
         var output = settings.OutputDirectory ?? System.IO.Path.Combine(path, ".kubernator");
         var options = new GenerationOptions
         {
             OutputDirectory = output,
             Namespace = settings.Namespace,
             Replicas = settings.Replicas ?? 1,
-            OverwriteExisting = !settings.NoOverwrite
+            OverwriteExisting = !settings.NoOverwrite,
+            Scaling = scaling
         };
 
         var result = await AnsiConsole.Status()

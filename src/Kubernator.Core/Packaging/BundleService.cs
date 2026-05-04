@@ -379,6 +379,22 @@ public sealed class BundleService : IBundleService
             }
         }
 
+        if (options.Scaling is { } scaling)
+        {
+            if (scaling.HpaEnabled)
+            {
+                var hpaPath = Path.Combine(manifestsDir, "hpa.yaml");
+                File.WriteAllText(hpaPath, AutoscalingEmitter.Hpa(name, ns, scaling));
+                written.Add(hpaPath);
+            }
+            if (scaling.PdbEnabled)
+            {
+                var pdbPath = Path.Combine(manifestsDir, "pdb.yaml");
+                File.WriteAllText(pdbPath, AutoscalingEmitter.Pdb(name, ns, scaling));
+                written.Add(pdbPath);
+            }
+        }
+
         return written;
     }
 

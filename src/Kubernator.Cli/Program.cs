@@ -62,6 +62,11 @@ app.Configure(config =>
         .WithExample("pipeline", "./publish", "--target", "gh-actions")
         .WithExample("pipeline", "./publish", "--target", "tekton", "-o", ".");
 
+    config.AddCommand<HelmCommand>("helm")
+        .WithDescription("Generate a Helm chart with parameterized templates.")
+        .WithExample("helm", "./publish", "-o", "./charts")
+        .WithExample("helm", "./publish", "--package", "--hostname", "app.example.com", "--tls", "self-signed");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");

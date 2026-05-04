@@ -9,6 +9,7 @@ public sealed record BundleOptions
     public int Replicas { get; init; } = 1;
     public bool BuildIfMissing { get; init; } = true;
     public bool KeepScratch { get; init; }
+    public Generation.ScalingOptions? Scaling { get; init; }
 }
 
 public sealed record BundleResult

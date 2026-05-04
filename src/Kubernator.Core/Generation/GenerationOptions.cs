@@ -10,6 +10,7 @@ public sealed record GenerationOptions
     public string? MemoryRequest { get; init; } = "128Mi";
     public string? MemoryLimit { get; init; } = "512Mi";
     public bool OverwriteExisting { get; init; } = true;
+    public ScalingOptions? Scaling { get; init; }
 }
 
 public sealed record GenerationResult

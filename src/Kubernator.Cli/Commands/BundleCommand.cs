@@ -98,6 +98,30 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
         [CommandOption("--tls-port <port>")]
         public int? TlsPort { get; init; }
 
+        [CommandOption("--hpa-min <n>")]
+        public int? HpaMin { get; init; }
+
+        [CommandOption("--hpa-max <n>")]
+        public int? HpaMax { get; init; }
+
+        [CommandOption("--hpa-cpu <pct>")]
+        public int? HpaCpu { get; init; }
+
+        [CommandOption("--hpa-memory <pct>")]
+        public int? HpaMemory { get; init; }
+
+        [CommandOption("--pdb-min-available <n>")]
+        public int? PdbMinAvailable { get; init; }
+
+        [CommandOption("--pdb-max-unavailable <n>")]
+        public int? PdbMaxUnavailable { get; init; }
+
+        [CommandOption("--pdb-min-available-percent <pct>")]
+        public string? PdbMinAvailablePercent { get; init; }
+
+        [CommandOption("--pdb-max-unavailable-percent <pct>")]
+        public string? PdbMaxUnavailablePercent { get; init; }
+
         public override ValidationResult Validate()
         {
             if (string.IsNullOrWhiteSpace(Path))
@@ -164,6 +188,16 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             ?? System.IO.Path.Combine(Environment.CurrentDirectory, $"{plan.ImageName}-{plan.ImageTag}.kubpack");
         var scratchDir = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(bundlePath) ?? ".", $".{plan.ImageName}-{plan.ImageTag}-scratch");
 
+        var scaling = ScalingBuilder.Build(
+            settings.HpaMin,
+            settings.HpaMax,
+            settings.HpaCpu,
+            settings.HpaMemory,
+            settings.PdbMinAvailable,
+            settings.PdbMaxUnavailable,
+            settings.PdbMinAvailablePercent,
+            settings.PdbMaxUnavailablePercent);
+
         var options = new BundleOptions
         {
             OutputBundlePath = bundlePath,
@@ -171,7 +205,8 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             IncludeSbom = !settings.NoSbom,
             KubernetesNamespace = settings.Namespace,
             Replicas = settings.Replicas ?? 1,
-            KeepScratch = settings.KeepScratch
+            KeepScratch = settings.KeepScratch,
+            Scaling = scaling
         };
 
         BundleResult result;
