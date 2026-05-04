@@ -19,6 +19,7 @@ using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Pipelines;
 using Kubernator.Core.Strategy;
+using Kubernator.Core.Vulnerabilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -50,6 +51,8 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<ICosignSigner, CosignSigner>();
         services.TryAddSingleton<IPipelineService, PipelineService>();
         services.TryAddSingleton<IHelmService, HelmService>();
+        services.TryAddSingleton<IVulnerabilityDatabase>(_ => FileVulnerabilityDatabase.Default());
+        services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
 
         return services;
     }

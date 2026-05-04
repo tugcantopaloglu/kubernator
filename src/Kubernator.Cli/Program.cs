@@ -67,6 +67,19 @@ app.Configure(config =>
         .WithExample("helm", "./publish", "-o", "./charts")
         .WithExample("helm", "./publish", "--package", "--hostname", "app.example.com", "--tls", "self-signed");
 
+    config.AddCommand<VulnDbCommand>("vulndb")
+        .WithDescription("Manage the offline vulnerability database (status / update / import-zip / import / export).")
+        .WithExample("vulndb", "update")
+        .WithExample("vulndb", "update", "--ecosystem", "NuGet")
+        .WithExample("vulndb", "import-zip", "--ecosystem", "NuGet", "--zip", "./NuGet.zip")
+        .WithExample("vulndb", "export", "--bundle", "./vulndb.tar.gz")
+        .WithExample("vulndb", "import", "--bundle", "./vulndb.tar.gz");
+
+    config.AddCommand<ScanCommand>("scan")
+        .WithDescription("Scan an application's dependencies against the local vulnerability database.")
+        .WithExample("scan", "./publish")
+        .WithExample("scan", "./publish", "--min-severity", "high", "--fail-on", "critical");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");
