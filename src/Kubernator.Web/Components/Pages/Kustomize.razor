@@ -1,0 +1,150 @@
+@page "/kustomize"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IKustomizeService KustomizeService
+
+<PageTitle>kustomize · kubernator</PageTitle>
+
+<h1>Kustomize</h1>
+<p class="subtitle">Generate a Kustomize <code>base/</code> + <code>overlays/</code> tree from a published application.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/kustomize)" />
+    </div>
+    <div class="form-row">
+        <label for="overlays">Overlays</label>
+        <InputText id="overlays" @bind-Value="form.OverlaysCsv" placeholder="staging,production" />
+    </div>
+    <div class="form-row">
+        <label for="namespace">Base namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
+        <label for="replicas">Replicas</label>
+        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+    </div>
+    <div class="form-row">
+        <label for="hostname">Hostname (optional)</label>
+        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        <label for="tls">TLS</label>
+        <InputSelect id="tls" @bind-Value="form.Tls">
+            <option value="">none</option>
+            <option value="self-signed">self-signed</option>
+            <option value="cert-manager">cert-manager</option>
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>base directory</h3>
+                <p><code>@result.BaseDirectory</code></p>
+            </div>
+            <div class="card">
+                <h3>files</h3>
+                <p>@result.WrittenFiles.Count file(s)</p>
+            </div>
+        </div>
+
+        <h2>files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(System.IO.Path.GetDirectoryName(result.BaseDirectory) ?? result.BaseDirectory, f)</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string OverlaysCsv { get; set; } = "production";
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public string? Hostname { get; set; }
+        public string? Tls { get; set; }
+    }
+
+    private readonly Form form = new();
+    private KustomizeResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+
+            ExposureOptions? exposure = null;
+            if (!string.IsNullOrWhiteSpace(form.Hostname))
+            {
+                var mode = form.Tls switch
+                {
+                    "cert-manager" => TlsMode.CertManager,
+                    "self-signed" => TlsMode.SelfSigned,
+                    _ => TlsMode.None
+                };
+                exposure = new ExposureOptions
+                {
+                    PrimaryHostname = form.Hostname!,
+                    TlsMode = mode
+                };
+            }
+
+            var overlays = form.OverlaysCsv
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToArray();
+
+            var plan = Strategy.Plan(descriptor, new StrategyOptions { Exposure = exposure });
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? System.IO.Path.Combine(resolved, ".kubernator", "kustomize")
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            result = await KustomizeService.GenerateAsync(plan, new KustomizeOptions
+            {
+                OutputDirectory = output,
+                BaseNamespace = form.Namespace,
+                Overlays = overlays.Length == 0 ? ["production"] : overlays,
+                Exposure = exposure,
+                Replicas = form.Replicas
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

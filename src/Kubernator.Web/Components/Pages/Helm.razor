@@ -1,0 +1,182 @@
+@page "/helm"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IHelmService HelmService
+
+<PageTitle>helm · kubernator</PageTitle>
+
+<h1>Helm</h1>
+<p class="subtitle">Generate a Helm chart (Chart.yaml, values.yaml, templates) from a published application.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/helm)" />
+    </div>
+    <div class="form-row">
+        <label for="chartName">Chart name</label>
+        <InputText id="chartName" @bind-Value="form.ChartName" placeholder="(auto)" />
+        <label for="chartVersion">Chart version</label>
+        <InputText id="chartVersion" @bind-Value="form.ChartVersion" />
+    </div>
+    <div class="form-row">
+        <label for="namespace">Namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
+        <label for="replicas">Replicas</label>
+        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+    </div>
+    <div class="form-row">
+        <label for="hostname">Hostname (optional)</label>
+        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        <label for="tls">TLS</label>
+        <InputSelect id="tls" @bind-Value="form.Tls">
+            <option value="">none</option>
+            <option value="self-signed">self-signed</option>
+            <option value="cert-manager">cert-manager</option>
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <label for="hpaMin">HPA min</label>
+        <InputNumber id="hpaMin" @bind-Value="form.HpaMin" />
+        <label for="hpaMax">HPA max</label>
+        <InputNumber id="hpaMax" @bind-Value="form.HpaMax" />
+        <label for="hpaCpu">HPA cpu %</label>
+        <InputNumber id="hpaCpu" @bind-Value="form.HpaCpu" />
+    </div>
+    <div class="form-row">
+        <label for="package">Package .tgz</label>
+        <InputCheckbox id="package" @bind-Value="form.Package" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate chart")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>chart directory</h3>
+                <p><code>@result.ChartDirectory</code></p>
+            </div>
+            @if (result.PackageFile is not null)
+            {
+                <div class="card">
+                    <h3>package</h3>
+                    <p><code>@result.PackageFile</code></p>
+                </div>
+            }
+        </div>
+
+        <h2>files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(result.ChartDirectory, f)</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string? ChartName { get; set; }
+        public string ChartVersion { get; set; } = "0.1.0";
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public string? Hostname { get; set; }
+        public string? Tls { get; set; }
+        public int? HpaMin { get; set; }
+        public int? HpaMax { get; set; }
+        public int? HpaCpu { get; set; }
+        public bool Package { get; set; }
+    }
+
+    private readonly Form form = new();
+    private HelmGenerationResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+
+            ExposureOptions? exposure = null;
+            if (!string.IsNullOrWhiteSpace(form.Hostname))
+            {
+                var mode = form.Tls switch
+                {
+                    "cert-manager" => TlsMode.CertManager,
+                    "self-signed" => TlsMode.SelfSigned,
+                    _ => TlsMode.None
+                };
+                exposure = new ExposureOptions
+                {
+                    PrimaryHostname = form.Hostname!,
+                    TlsMode = mode
+                };
+            }
+
+            ScalingOptions? scaling = null;
+            if (form.HpaMin.HasValue || form.HpaMax.HasValue || form.HpaCpu.HasValue)
+            {
+                scaling = new ScalingOptions
+                {
+                    HpaMinReplicas = form.HpaMin,
+                    HpaMaxReplicas = form.HpaMax,
+                    HpaTargetCpuUtilization = form.HpaCpu
+                };
+            }
+
+            var plan = Strategy.Plan(descriptor, new StrategyOptions { Exposure = exposure });
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? System.IO.Path.Combine(resolved, ".kubernator", "helm")
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            result = await HelmService.GenerateAsync(plan, new HelmOptions
+            {
+                OutputDirectory = output,
+                ChartName = string.IsNullOrWhiteSpace(form.ChartName) ? null : form.ChartName,
+                ChartVersion = form.ChartVersion,
+                Namespace = form.Namespace,
+                Replicas = form.Replicas,
+                Exposure = exposure,
+                Scaling = scaling,
+                Package = form.Package
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

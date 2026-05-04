@@ -1,0 +1,208 @@
+@page "/bundle"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IBundleService Bundles
+@inject IContainerEngineProvider EngineProvider
+
+<PageTitle>bundle · kubernator</PageTitle>
+
+<h1>Bundle</h1>
+<p class="subtitle">Build a signed, air-gapped <code>.kubpack</code> with image tar, manifests, SBOM, and install scripts.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output bundle</label>
+        <InputText id="output" @bind-Value="form.OutputBundlePath" placeholder="(default: <name>-<tag>.kubpack)" />
+    </div>
+    <div class="form-row">
+        <label for="image">Image name</label>
+        <InputText id="image" @bind-Value="form.ImageName" placeholder="(auto)" />
+        <label for="tag">Image tag</label>
+        <InputText id="tag" @bind-Value="form.ImageTag" placeholder="(auto)" />
+    </div>
+    <div class="form-row">
+        <label for="namespace">Namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
+        <label for="replicas">Replicas</label>
+        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+    </div>
+    <div class="form-row">
+        <label for="hostname">Hostname (optional)</label>
+        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        <label for="tls">TLS</label>
+        <InputSelect id="tls" @bind-Value="form.Tls">
+            <option value="">none</option>
+            <option value="self-signed">self-signed</option>
+            <option value="cert-manager">cert-manager</option>
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <label for="sbom">Include SBOM</label>
+        <InputCheckbox id="sbom" @bind-Value="form.IncludeSbom" />
+        <label for="keep">Keep scratch</label>
+        <InputCheckbox id="keep" @bind-Value="form.KeepScratch" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "bundling…" : "bundle")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+    @if (engineStatus is not null)
+    {
+        <p class="muted">engine: @engineStatus</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>bundle</h3>
+                <p><code>@result.BundlePath</code></p>
+                <p class="muted">size: @FormatSize(result.BundleSizeBytes)</p>
+            </div>
+            <div class="card">
+                <h3>sha256</h3>
+                <p><code>@result.BundleSha256</code></p>
+            </div>
+            <div class="card">
+                <h3>contents</h3>
+                <p>@result.Manifest.Images.Count image(s)</p>
+                <p class="muted">@result.Manifest.Files.Count file(s) · ns: @result.Manifest.KubernetesNamespace</p>
+            </div>
+        </div>
+
+        @if (result.Manifest.Images.Count > 0)
+        {
+            <h2>images</h2>
+            <ul class="file-list">
+                @foreach (var img in result.Manifest.Images)
+                {
+                    <li><code>@img.Reference</code> · @FormatSize(img.SizeBytes)</li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputBundlePath { get; set; }
+        public string? ImageName { get; set; }
+        public string? ImageTag { get; set; }
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public string? Hostname { get; set; }
+        public string? Tls { get; set; }
+        public bool IncludeSbom { get; set; } = true;
+        public bool KeepScratch { get; set; }
+    }
+
+    private readonly Form form = new();
+    private BundleResult? result;
+    private string? error;
+    private string? engineStatus;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var engine = await EngineProvider.ResolveAsync();
+            var info = await engine.GetInfoAsync();
+            engineStatus = $"{info.Name} {info.Version} ({info.OperatingSystem}/{info.Architecture})";
+        }
+        catch (Exception ex)
+        {
+            engineStatus = $"unavailable — {ex.Message}";
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+
+            ExposureOptions? exposure = null;
+            if (!string.IsNullOrWhiteSpace(form.Hostname))
+            {
+                var mode = form.Tls switch
+                {
+                    "cert-manager" => TlsMode.CertManager,
+                    "self-signed" => TlsMode.SelfSigned,
+                    _ => TlsMode.None
+                };
+                exposure = new ExposureOptions
+                {
+                    PrimaryHostname = form.Hostname!,
+                    TlsMode = mode
+                };
+            }
+
+            var plan = Strategy.Plan(descriptor, new StrategyOptions
+            {
+                ImageName = string.IsNullOrWhiteSpace(form.ImageName) ? null : form.ImageName,
+                ImageTag = string.IsNullOrWhiteSpace(form.ImageTag) ? null : form.ImageTag,
+                Exposure = exposure
+            });
+
+            var engine = await EngineProvider.ResolveAsync();
+
+            var bundlePath = string.IsNullOrWhiteSpace(form.OutputBundlePath)
+                ? System.IO.Path.Combine(Environment.CurrentDirectory, $"{plan.ImageName}-{plan.ImageTag}.kubpack")
+                : System.IO.Path.GetFullPath(form.OutputBundlePath!);
+            var scratchDir = System.IO.Path.Combine(
+                System.IO.Path.GetDirectoryName(bundlePath) ?? ".",
+                $".{plan.ImageName}-{plan.ImageTag}-scratch");
+
+            var options = new BundleOptions
+            {
+                OutputBundlePath = bundlePath,
+                ScratchDirectory = scratchDir,
+                IncludeSbom = form.IncludeSbom,
+                KubernetesNamespace = form.Namespace,
+                Replicas = form.Replicas,
+                KeepScratch = form.KeepScratch
+            };
+
+            result = await Bundles.CreateAsync(plan, options, engine);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+        if (bytes >= 1024L * 1024) return $"{bytes / 1024.0 / 1024:F2} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F2} KB";
+        return $"{bytes} B";
+    }
+}

@@ -1,0 +1,248 @@
+@page "/vulndb"
+@rendermode InteractiveServer
+@inject IVulnerabilityDatabase Database
+
+<PageTitle>vulndb · kubernator</PageTitle>
+
+<h1>Vulnerability database</h1>
+<p class="subtitle">Manage the local OSV database used by <code>scan</code>. Import OSV zips or transport via offline bundles.</p>
+
+<section>
+    <h2>status</h2>
+    <div class="card-grid">
+        <div class="card">
+            <h3>root</h3>
+            <p><code>@Database.RootDirectory</code></p>
+        </div>
+        @if (manifest is null)
+        {
+            <div class="card">
+                <h3>manifest</h3>
+                <p class="muted">not present</p>
+                <p class="muted">use one of the actions below to populate the database</p>
+            </div>
+        }
+        else
+        {
+            <div class="card">
+                <h3>updated</h3>
+                <p>@manifest.UpdatedAt:O</p>
+                <p class="muted">schema: @manifest.SchemaVersion</p>
+            </div>
+            <div class="card">
+                <h3>ecosystems</h3>
+                <p>@manifest.Ecosystems.Count</p>
+            </div>
+        }
+    </div>
+
+    @if (manifest is not null && manifest.Ecosystems.Count > 0)
+    {
+        <table class="findings">
+            <thead>
+                <tr>
+                    <th>ecosystem</th>
+                    <th>packages</th>
+                    <th>vulnerabilities</th>
+                    <th>last imported</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var (name, summary) in manifest.Ecosystems)
+                {
+                    <tr>
+                        <td>@name</td>
+                        <td>@summary.PackageCount</td>
+                        <td>@summary.VulnerabilityCount</td>
+                        <td>@(summary.LastImportedAt is null ? "-" : summary.LastImportedAt.Value.ToString("O"))</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+<section>
+    <h2>import OSV zip</h2>
+    <EditForm Model="@importForm" OnValidSubmit="@HandleImportZip" class="form">
+        <div class="form-row">
+            <label for="iz-eco">Ecosystem</label>
+            <InputSelect id="iz-eco" @bind-Value="importForm.Ecosystem">
+                <option value="NuGet">NuGet</option>
+                <option value="npm">npm</option>
+                <option value="PyPI">PyPI</option>
+                <option value="Maven">Maven</option>
+                <option value="Go">Go</option>
+            </InputSelect>
+        </div>
+        <div class="form-row">
+            <label for="iz-zip">Zip path</label>
+            <InputText id="iz-zip" @bind-Value="importForm.ZipPath" placeholder="C:/path/to/all.zip" />
+            <button type="submit" disabled="@busyImport">@(busyImport ? "importing…" : "import")</button>
+        </div>
+        @if (importMessage is not null)
+        {
+            <p class="@(importError ? "error" : "ok")">@importMessage</p>
+        }
+    </EditForm>
+</section>
+
+<section>
+    <h2>export bundle</h2>
+    <EditForm Model="@exportForm" OnValidSubmit="@HandleExport" class="form">
+        <div class="form-row">
+            <label for="ex-out">Output bundle</label>
+            <InputText id="ex-out" @bind-Value="exportForm.OutputPath" placeholder="C:/path/to/vulndb.tar.gz" />
+            <button type="submit" disabled="@busyExport">@(busyExport ? "exporting…" : "export")</button>
+        </div>
+        @if (exportMessage is not null)
+        {
+            <p class="@(exportError ? "error" : "ok")">@exportMessage</p>
+        }
+    </EditForm>
+</section>
+
+<section>
+    <h2>import bundle</h2>
+    <EditForm Model="@bundleImportForm" OnValidSubmit="@HandleImportBundle" class="form">
+        <div class="form-row">
+            <label for="ib-path">Bundle path</label>
+            <InputText id="ib-path" @bind-Value="bundleImportForm.BundlePath" placeholder="C:/path/to/vulndb.tar.gz" />
+            <button type="submit" disabled="@busyBundleImport">@(busyBundleImport ? "importing…" : "import")</button>
+        </div>
+        @if (bundleImportMessage is not null)
+        {
+            <p class="@(bundleImportError ? "error" : "ok")">@bundleImportMessage</p>
+        }
+    </EditForm>
+</section>
+
+@code {
+    private sealed class ImportForm
+    {
+        public string Ecosystem { get; set; } = "NuGet";
+        public string ZipPath { get; set; } = string.Empty;
+    }
+    private sealed class ExportForm
+    {
+        public string OutputPath { get; set; } = string.Empty;
+    }
+    private sealed class BundleImportForm
+    {
+        public string BundlePath { get; set; } = string.Empty;
+    }
+
+    private VulnDatabaseManifest? manifest;
+    private readonly ImportForm importForm = new();
+    private readonly ExportForm exportForm = new();
+    private readonly BundleImportForm bundleImportForm = new();
+
+    private string? importMessage;
+    private bool importError;
+    private bool busyImport;
+
+    private string? exportMessage;
+    private bool exportError;
+    private bool busyExport;
+
+    private string? bundleImportMessage;
+    private bool bundleImportError;
+    private bool busyBundleImport;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshManifest();
+    }
+
+    private async Task RefreshManifest()
+    {
+        manifest = await Database.GetManifestAsync();
+    }
+
+    private async Task HandleImportZip()
+    {
+        if (string.IsNullOrWhiteSpace(importForm.ZipPath))
+        {
+            importMessage = "zip path is required";
+            importError = true;
+            return;
+        }
+        busyImport = true;
+        importError = false;
+        importMessage = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(importForm.ZipPath);
+            var r = await Database.ImportOsvZipAsync(importForm.Ecosystem, resolved);
+            importMessage = $"imported {r.VulnerabilityCount} vulnerabilities across {r.PackageCount} packages ({r.Ecosystem})";
+            await RefreshManifest();
+        }
+        catch (Exception ex)
+        {
+            importError = true;
+            importMessage = ex.Message;
+        }
+        finally
+        {
+            busyImport = false;
+        }
+    }
+
+    private async Task HandleExport()
+    {
+        if (string.IsNullOrWhiteSpace(exportForm.OutputPath))
+        {
+            exportMessage = "output path is required";
+            exportError = true;
+            return;
+        }
+        busyExport = true;
+        exportError = false;
+        exportMessage = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(exportForm.OutputPath);
+            var path = await Database.ExportBundleAsync(resolved);
+            var size = new FileInfo(path).Length;
+            exportMessage = $"exported {path} ({size / 1024} KB)";
+        }
+        catch (Exception ex)
+        {
+            exportError = true;
+            exportMessage = ex.Message;
+        }
+        finally
+        {
+            busyExport = false;
+        }
+    }
+
+    private async Task HandleImportBundle()
+    {
+        if (string.IsNullOrWhiteSpace(bundleImportForm.BundlePath))
+        {
+            bundleImportMessage = "bundle path is required";
+            bundleImportError = true;
+            return;
+        }
+        busyBundleImport = true;
+        bundleImportError = false;
+        bundleImportMessage = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(bundleImportForm.BundlePath);
+            await Database.ImportBundleAsync(resolved);
+            bundleImportMessage = "bundle imported";
+            await RefreshManifest();
+        }
+        catch (Exception ex)
+        {
+            bundleImportError = true;
+            bundleImportMessage = ex.Message;
+        }
+        finally
+        {
+            busyBundleImport = false;
+        }
+    }
+}

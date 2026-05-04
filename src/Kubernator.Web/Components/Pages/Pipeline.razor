@@ -1,0 +1,161 @@
+@page "/pipeline"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IPipelineService Pipelines
+
+<PageTitle>pipeline · kubernator</PageTitle>
+
+<h1>Pipeline</h1>
+<p class="subtitle">Generate CI/CD pipeline files for GitHub Actions, GitLab CI, Azure DevOps, or Tekton.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish (for language detection)" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: current directory)" />
+    </div>
+    <div class="form-row">
+        <label for="target">Target</label>
+        <InputSelect id="target" @bind-Value="form.Target">
+            <option value="gh-actions">GitHub Actions</option>
+            <option value="gitlab">GitLab CI</option>
+            <option value="azure">Azure DevOps</option>
+            <option value="tekton">Tekton</option>
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <label for="image">Image name</label>
+        <InputText id="image" @bind-Value="form.ImageName" placeholder="(auto)" />
+        <label for="tag">Image tag</label>
+        <InputText id="tag" @bind-Value="form.ImageTag" placeholder="(auto)" />
+    </div>
+    <div class="form-row">
+        <label for="registry">Registry</label>
+        <InputText id="registry" @bind-Value="form.Registry" />
+        <label for="namespace">Namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" />
+    </div>
+    <div class="form-row">
+        <label for="publish">Publish path in repo</label>
+        <InputText id="publish" @bind-Value="form.PublishPath" />
+    </div>
+    <div class="form-row">
+        <label for="sign">Sign bundle</label>
+        <InputCheckbox id="sign" @bind-Value="form.Sign" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <h2>generated files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(Environment.CurrentDirectory, f)</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string Target { get; set; } = "gh-actions";
+        public string? ImageName { get; set; }
+        public string? ImageTag { get; set; }
+        public string Registry { get; set; } = "registry.example.com";
+        public string Namespace { get; set; } = "default";
+        public string PublishPath { get; set; } = "./publish";
+        public bool Sign { get; set; }
+    }
+
+    private readonly Form form = new();
+    private PipelineGenerationResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+
+            var target = form.Target switch
+            {
+                "gitlab" => PipelineTarget.GitLabCi,
+                "azure" => PipelineTarget.AzureDevOps,
+                "tekton" => PipelineTarget.Tekton,
+                _ => PipelineTarget.GitHubActions
+            };
+
+            var imageName = string.IsNullOrWhiteSpace(form.ImageName)
+                ? descriptor.EntryPoint?.AssemblyName ?? "app"
+                : form.ImageName!;
+            var imageTag = string.IsNullOrWhiteSpace(form.ImageTag)
+                ? descriptor.Runtime.Version ?? "0.1.0"
+                : form.ImageTag!;
+
+            var options = new PipelineOptions
+            {
+                AppKind = descriptor.Kind,
+                ImageName = SanitizeName(imageName),
+                ImageTag = SanitizeTag(imageTag),
+                Registry = form.Registry,
+                Namespace = form.Namespace,
+                PublishPath = form.PublishPath,
+                SignBundle = form.Sign,
+                RunVerify = true
+            };
+
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? Environment.CurrentDirectory
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            result = await Pipelines.GenerateAsync(target, options, output);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string SanitizeName(string raw)
+    {
+        var lowered = raw.ToLowerInvariant();
+        var chars = lowered.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '-').ToArray();
+        return new string(chars).Trim('-');
+    }
+
+    private static string SanitizeTag(string raw)
+    {
+        var chars = raw.Select(c => char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_' ? c : '-').ToArray();
+        return new string(chars).TrimStart('.', '-').Trim();
+    }
+}

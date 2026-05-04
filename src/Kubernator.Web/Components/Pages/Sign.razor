@@ -1,0 +1,225 @@
+@page "/sign"
+@rendermode InteractiveServer
+@inject ICosignSigner Signer
+
+<PageTitle>sign · kubernator</PageTitle>
+
+<h1>Sign</h1>
+<p class="subtitle">Generate cosign-format ECDSA P-256 keys, sign blobs, and verify signatures — fully offline.</p>
+
+<section>
+    <h2>generate key pair</h2>
+    <EditForm Model="@keyForm" OnValidSubmit="@HandleKeygen" class="form">
+        <div class="form-row">
+            <label for="kg-out">Output directory</label>
+            <InputText id="kg-out" @bind-Value="keyForm.OutputDirectory" placeholder="C:/keys" />
+            <label for="kg-name">Base name</label>
+            <InputText id="kg-name" @bind-Value="keyForm.BaseName" />
+        </div>
+        <div class="form-row">
+            <label for="kg-pass">Passphrase</label>
+            <InputText id="kg-pass" type="password" @bind-Value="keyForm.Passphrase" placeholder="(optional)" />
+            <button type="submit" disabled="@busyKey">@(busyKey ? "generating…" : "generate")</button>
+        </div>
+        @if (keyError is not null)
+        {
+            <p class="error">@keyError</p>
+        }
+        @if (keyResult is not null)
+        {
+            <div class="card-grid">
+                <div class="card">
+                    <h3>private key</h3>
+                    <p><code>@keyResult.PrivateKeyPath</code></p>
+                    <p class="muted">encrypted: @(keyResult.PrivateKeyEncrypted ? "yes" : "no")</p>
+                </div>
+                <div class="card">
+                    <h3>public key</h3>
+                    <p><code>@keyResult.PublicKeyPath</code></p>
+                </div>
+            </div>
+        }
+    </EditForm>
+</section>
+
+<section>
+    <h2>sign blob</h2>
+    <EditForm Model="@signForm" OnValidSubmit="@HandleSign" class="form">
+        <div class="form-row">
+            <label for="s-blob">Blob path</label>
+            <InputText id="s-blob" @bind-Value="signForm.BlobPath" placeholder="C:/path/to/file" />
+        </div>
+        <div class="form-row">
+            <label for="s-key">Private key</label>
+            <InputText id="s-key" @bind-Value="signForm.PrivateKeyPath" placeholder="C:/keys/cosign.key" />
+            <label for="s-pass">Passphrase</label>
+            <InputText id="s-pass" type="password" @bind-Value="signForm.Passphrase" placeholder="(optional)" />
+            <button type="submit" disabled="@busySign">@(busySign ? "signing…" : "sign")</button>
+        </div>
+        @if (signError is not null)
+        {
+            <p class="error">@signError</p>
+        }
+        @if (signResult is not null)
+        {
+            <div class="card-grid">
+                <div class="card">
+                    <h3>signature</h3>
+                    <p><code>@signResult.SignaturePath</code></p>
+                </div>
+                <div class="card">
+                    <h3>public key copy</h3>
+                    <p><code>@signResult.PublicKeyCopyPath</code></p>
+                </div>
+            </div>
+            <p class="muted">base64: <code>@signResult.SignatureBase64</code></p>
+        }
+    </EditForm>
+</section>
+
+<section>
+    <h2>verify blob</h2>
+    <EditForm Model="@verifyForm" OnValidSubmit="@HandleVerify" class="form">
+        <div class="form-row">
+            <label for="v-blob">Blob path</label>
+            <InputText id="v-blob" @bind-Value="verifyForm.BlobPath" />
+        </div>
+        <div class="form-row">
+            <label for="v-sig">Signature path</label>
+            <InputText id="v-sig" @bind-Value="verifyForm.SignaturePath" />
+        </div>
+        <div class="form-row">
+            <label for="v-pub">Public key path</label>
+            <InputText id="v-pub" @bind-Value="verifyForm.PublicKeyPath" />
+            <button type="submit" disabled="@busyVerify">@(busyVerify ? "verifying…" : "verify")</button>
+        </div>
+        @if (verifyMessage is not null)
+        {
+            <p class="@(verifyOk ? "ok" : "error")">@verifyMessage</p>
+        }
+    </EditForm>
+</section>
+
+@code {
+    private sealed class KeyForm
+    {
+        public string OutputDirectory { get; set; } = string.Empty;
+        public string BaseName { get; set; } = "cosign";
+        public string? Passphrase { get; set; }
+    }
+    private sealed class SignForm
+    {
+        public string BlobPath { get; set; } = string.Empty;
+        public string PrivateKeyPath { get; set; } = string.Empty;
+        public string? Passphrase { get; set; }
+    }
+    private sealed class VerifyForm
+    {
+        public string BlobPath { get; set; } = string.Empty;
+        public string SignaturePath { get; set; } = string.Empty;
+        public string PublicKeyPath { get; set; } = string.Empty;
+    }
+
+    private readonly KeyForm keyForm = new();
+    private readonly SignForm signForm = new();
+    private readonly VerifyForm verifyForm = new();
+
+    private KeyPairFiles? keyResult;
+    private string? keyError;
+    private bool busyKey;
+
+    private SignResult? signResult;
+    private string? signError;
+    private bool busySign;
+
+    private string? verifyMessage;
+    private bool verifyOk;
+    private bool busyVerify;
+
+    private async Task HandleKeygen()
+    {
+        if (string.IsNullOrWhiteSpace(keyForm.OutputDirectory))
+        {
+            keyError = "output directory is required";
+            return;
+        }
+        keyError = null;
+        keyResult = null;
+        busyKey = true;
+        try
+        {
+            var dir = System.IO.Path.GetFullPath(keyForm.OutputDirectory);
+            keyResult = await Signer.GenerateKeyPairAsync(
+                dir,
+                string.IsNullOrWhiteSpace(keyForm.BaseName) ? "cosign" : keyForm.BaseName,
+                string.IsNullOrEmpty(keyForm.Passphrase) ? null : keyForm.Passphrase);
+        }
+        catch (Exception ex)
+        {
+            keyError = ex.Message;
+        }
+        finally
+        {
+            busyKey = false;
+        }
+    }
+
+    private async Task HandleSign()
+    {
+        if (string.IsNullOrWhiteSpace(signForm.BlobPath) || string.IsNullOrWhiteSpace(signForm.PrivateKeyPath))
+        {
+            signError = "blob path and private key path are required";
+            return;
+        }
+        signError = null;
+        signResult = null;
+        busySign = true;
+        try
+        {
+            signResult = await Signer.SignBlobAsync(
+                System.IO.Path.GetFullPath(signForm.BlobPath),
+                System.IO.Path.GetFullPath(signForm.PrivateKeyPath),
+                string.IsNullOrEmpty(signForm.Passphrase) ? null : signForm.Passphrase);
+        }
+        catch (Exception ex)
+        {
+            signError = ex.Message;
+        }
+        finally
+        {
+            busySign = false;
+        }
+    }
+
+    private async Task HandleVerify()
+    {
+        if (string.IsNullOrWhiteSpace(verifyForm.BlobPath)
+            || string.IsNullOrWhiteSpace(verifyForm.SignaturePath)
+            || string.IsNullOrWhiteSpace(verifyForm.PublicKeyPath))
+        {
+            verifyMessage = "all paths are required";
+            verifyOk = false;
+            return;
+        }
+        verifyMessage = null;
+        busyVerify = true;
+        try
+        {
+            var r = await Signer.VerifyBlobAsync(
+                System.IO.Path.GetFullPath(verifyForm.BlobPath),
+                System.IO.Path.GetFullPath(verifyForm.SignaturePath),
+                System.IO.Path.GetFullPath(verifyForm.PublicKeyPath));
+            verifyOk = r.Valid;
+            verifyMessage = r.Valid ? "signature is valid" : $"invalid: {r.Error}";
+        }
+        catch (Exception ex)
+        {
+            verifyOk = false;
+            verifyMessage = ex.Message;
+        }
+        finally
+        {
+            busyVerify = false;
+        }
+    }
+}
