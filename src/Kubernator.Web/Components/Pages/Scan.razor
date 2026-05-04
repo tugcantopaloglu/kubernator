@@ -1,0 +1,131 @@
+@page "/scan"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IVulnerabilityScanner Scanner
+@inject IVulnerabilityDatabase Database
+
+<PageTitle>scan · kubernator</PageTitle>
+
+<h1>Scan</h1>
+<p class="subtitle">Scan dependencies against the local OSV vulnerability database.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        <label for="severity">Min severity</label>
+        <InputSelect id="severity" @bind-Value="form.MinSeverity">
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+        </InputSelect>
+        <button type="submit" disabled="@busy">@(busy ? "scanning…" : "scan")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (dbStatus is not null)
+{
+    <p class="muted">database: @dbStatus</p>
+}
+
+@if (result is not null)
+{
+    <section class="result">
+        <p>
+            <strong>@result.Findings.Count</strong> finding(s) across
+            <strong>@result.PackagesScanned</strong> package(s) (ecosystem <code>@result.Ecosystem</code>)
+        </p>
+
+        @if (result.Findings.Count > 0)
+        {
+            <table class="findings">
+                <thead>
+                    <tr>
+                        <th>severity</th>
+                        <th>id</th>
+                        <th>package</th>
+                        <th>version</th>
+                        <th>fixed in</th>
+                        <th>summary</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in result.Findings)
+                    {
+                        <tr class="severity-@f.Severity.ToString().ToLowerInvariant()">
+                            <td>@f.Severity</td>
+                            <td>@f.VulnerabilityId</td>
+                            <td>@f.PackageName</td>
+                            <td>@f.PackageVersion</td>
+                            <td>@(f.FixedIn ?? "-")</td>
+                            <td>@(f.Summary ?? string.Empty)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        else
+        {
+            <p class="ok">no known vulnerabilities</p>
+        }
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string MinSeverity { get; set; } = "low";
+    }
+
+    private readonly Form form = new();
+    private ScanResult? result;
+    private string? error;
+    private string? dbStatus;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var manifest = await Database.GetManifestAsync();
+        dbStatus = manifest is null
+            ? "not present (run kubernator vulndb update or vulndb import)"
+            : $"{manifest.Ecosystems.Count} ecosystems, updated {manifest.UpdatedAt:O}";
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        try
+        {
+            var descriptor = await Analysis.AnalyzeAsync(System.IO.Path.GetFullPath(form.Path));
+            var minSeverity = form.MinSeverity.ToLowerInvariant() switch
+            {
+                "medium" => Severity.Medium,
+                "high" => Severity.High,
+                "critical" => Severity.Critical,
+                _ => Severity.Low
+            };
+            result = await Scanner.ScanAsync(descriptor, new ScanOptions { MinSeverity = minSeverity });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

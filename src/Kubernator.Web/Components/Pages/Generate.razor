@@ -1,0 +1,150 @@
+@page "/generate"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IGenerationService Generation
+
+<PageTitle>generate · kubernator</PageTitle>
+
+<h1>Generate</h1>
+<p class="subtitle">Generate Dockerfile, Kubernetes manifests, optional Ingress + TLS, HPA, PDB.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator)" />
+    </div>
+    <div class="form-row">
+        <label for="namespace">Namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
+        <label for="replicas">Replicas</label>
+        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+    </div>
+    <div class="form-row">
+        <label for="hostname">Hostname (optional)</label>
+        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        <label for="tls">TLS</label>
+        <InputSelect id="tls" @bind-Value="form.Tls">
+            <option value="">none</option>
+            <option value="self-signed">self-signed</option>
+            <option value="cert-manager">cert-manager</option>
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <label for="hpaMin">HPA min</label>
+        <InputNumber id="hpaMin" @bind-Value="form.HpaMin" />
+        <label for="hpaMax">HPA max</label>
+        <InputNumber id="hpaMax" @bind-Value="form.HpaMax" />
+        <label for="hpaCpu">HPA cpu %</label>
+        <InputNumber id="hpaCpu" @bind-Value="form.HpaCpu" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <h2>generated files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(Environment.CurrentDirectory, f)</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public string? Hostname { get; set; }
+        public string? Tls { get; set; }
+        public int? HpaMin { get; set; }
+        public int? HpaMax { get; set; }
+        public int? HpaCpu { get; set; }
+    }
+
+    private readonly Form form = new();
+    private GenerationResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+
+            ExposureOptions? exposure = null;
+            if (!string.IsNullOrWhiteSpace(form.Hostname))
+            {
+                var mode = form.Tls switch
+                {
+                    "cert-manager" => TlsMode.CertManager,
+                    "self-signed" => TlsMode.SelfSigned,
+                    _ => TlsMode.None
+                };
+                exposure = new ExposureOptions
+                {
+                    PrimaryHostname = form.Hostname!,
+                    TlsMode = mode
+                };
+            }
+
+            ScalingOptions? scaling = null;
+            if (form.HpaMin.HasValue || form.HpaMax.HasValue || form.HpaCpu.HasValue)
+            {
+                scaling = new ScalingOptions
+                {
+                    HpaMinReplicas = form.HpaMin,
+                    HpaMaxReplicas = form.HpaMax,
+                    HpaTargetCpuUtilization = form.HpaCpu
+                };
+            }
+
+            var plan = Strategy.Plan(descriptor, new StrategyOptions { Exposure = exposure });
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? System.IO.Path.Combine(resolved, ".kubernator")
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            result = await Generation.GenerateAsync(plan, new GenerationOptions
+            {
+                OutputDirectory = output,
+                Namespace = form.Namespace,
+                Replicas = form.Replicas,
+                Scaling = scaling
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

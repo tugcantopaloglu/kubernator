@@ -1,0 +1,96 @@
+@page "/analyze"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+
+<PageTitle>analyze · kubernator</PageTitle>
+
+<h1>Analyze</h1>
+<p class="subtitle">Detect the application at a path and inspect runtime, ports, and dependencies.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        <button type="submit" disabled="@busy">@(busy ? "analyzing…" : "analyze")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (descriptor is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>kind</h3>
+                <p>@descriptor.Kind / @descriptor.Flavor</p>
+            </div>
+            <div class="card">
+                <h3>runtime</h3>
+                <p>@descriptor.Runtime.Name @descriptor.Runtime.Version</p>
+                <p class="muted">tfm: @(descriptor.Runtime.Tfm ?? "?") · rid: @(descriptor.Runtime.RuntimeIdentifier ?? "(framework-dependent)")</p>
+            </div>
+            <div class="card">
+                <h3>network</h3>
+                <p>ports: @(descriptor.Network.Ports.Count == 0 ? "(none)" : string.Join(", ", descriptor.Network.Ports))</p>
+                <p class="muted">http: @(descriptor.Network.ListensHttp ? "yes" : "no") · https: @(descriptor.Network.ListensHttps ? "yes" : "no")</p>
+            </div>
+            <div class="card">
+                <h3>dependencies</h3>
+                <p>@descriptor.Dependencies.Managed.Count managed · @descriptor.Dependencies.Native.Count native</p>
+                <p class="muted">requires icu: @(descriptor.Dependencies.RequiresIcu ? "yes" : "no")</p>
+            </div>
+        </div>
+
+        @if (descriptor.Warnings.Count > 0)
+        {
+            <div class="warnings">
+                <h3>warnings</h3>
+                <ul>
+                    @foreach (var w in descriptor.Warnings)
+                    {
+                        <li>@w</li>
+                    }
+                </ul>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+    }
+
+    private readonly Form form = new();
+    private AppDescriptor? descriptor;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        try
+        {
+            descriptor = await Analysis.AnalyzeAsync(System.IO.Path.GetFullPath(form.Path));
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            descriptor = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Kubernator.Web</RootNamespace>
+    <AssemblyName>Kubernator.Web</AssemblyName>
+    <UserSecretsId>kubernator-web-local</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kubernator.Core\Kubernator.Core.csproj" />
+    <ProjectReference Include="..\Kubernator.Runtime\Kubernator.Runtime.csproj" />
+  </ItemGroup>
+
+</Project>

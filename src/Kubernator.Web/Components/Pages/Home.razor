@@ -1,0 +1,35 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IServiceProvider Services
+
+<PageTitle>kubernator</PageTitle>
+
+<h1>Dashboard</h1>
+
+<p class="subtitle">Containerize, harden, and ship applications to Kubernetes — even in air-gapped environments.</p>
+
+<div class="card-grid">
+    <div class="card">
+        <h3>analyze</h3>
+        <p>Detect application kind, runtime, ports, dependencies.</p>
+        <a class="card-link" href="analyze">open</a>
+    </div>
+    <div class="card">
+        <h3>generate</h3>
+        <p>Emit Dockerfile, Kubernetes manifests, Ingress, TLS, HPA, PDB.</p>
+        <a class="card-link" href="generate">open</a>
+    </div>
+    <div class="card">
+        <h3>scan</h3>
+        <p>Match dependencies against the local OSV database.</p>
+        <a class="card-link" href="scan">open</a>
+    </div>
+</div>
+
+<section class="status">
+    <h2>Status</h2>
+    <ul>
+        <li>Working directory: <code>@Environment.CurrentDirectory</code></li>
+        <li>Kubernetes target: <code>secure registries only (mcr, cgr, gcr, registry.k8s.io)</code></li>
+    </ul>
+</section>

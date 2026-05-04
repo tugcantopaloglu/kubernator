@@ -1,0 +1,31 @@
+@inject NavigationManager Nav
+
+<nav class="sidebar">
+    <div class="brand">
+        <span class="brand-name">kubernator</span>
+        <span class="brand-version">0.1.0</span>
+    </div>
+
+    <ul class="nav-items">
+        <li class="@ActiveClass("")">
+            <a href="">Dashboard</a>
+        </li>
+        <li class="@ActiveClass("analyze")">
+            <a href="analyze">Analyze</a>
+        </li>
+        <li class="@ActiveClass("generate")">
+            <a href="generate">Generate</a>
+        </li>
+        <li class="@ActiveClass("scan")">
+            <a href="scan">Scan</a>
+        </li>
+    </ul>
+</nav>
+
+@code {
+    private string ActiveClass(string segment)
+    {
+        var current = new Uri(Nav.Uri).AbsolutePath.Trim('/');
+        return string.Equals(current, segment, StringComparison.OrdinalIgnoreCase) ? "nav-item active" : "nav-item";
+    }
+}
