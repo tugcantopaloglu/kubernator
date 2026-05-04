@@ -85,6 +85,11 @@ app.Configure(config =>
         .WithExample("scan", "./publish")
         .WithExample("scan", "./publish", "--min-severity", "high", "--fail-on", "critical");
 
+    config.AddCommand<ValidateCommand>("validate")
+        .WithDescription("Validate the build end-to-end on a local kind cluster (requires kind + kubectl on PATH).")
+        .WithExample("validate", "./publish")
+        .WithExample("validate", "./publish", "--probe-path", "/health", "--keep-cluster");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");
