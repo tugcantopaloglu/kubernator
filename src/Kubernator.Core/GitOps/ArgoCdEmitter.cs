@@ -146,6 +146,35 @@ internal static class ArgoCdEmitter
         w.Line("  - group: \"cert-manager.io\"");
         w.Line("    kind: \"*\"");
 
+        if (options.Roles.Count > 0)
+        {
+            w.Line("roles:");
+            foreach (var role in options.Roles)
+            {
+                w.Line($"  - name: {YamlValue.String(role.Name)}");
+                if (!string.IsNullOrEmpty(role.Description))
+                {
+                    w.Line($"    description: {YamlValue.String(role.Description!)}");
+                }
+                if (role.Policies.Count > 0)
+                {
+                    w.Line("    policies:");
+                    foreach (var policy in role.Policies)
+                    {
+                        w.Line($"      - {YamlValue.String(policy)}");
+                    }
+                }
+                if (role.Groups.Count > 0)
+                {
+                    w.Line("    groups:");
+                    foreach (var group in role.Groups)
+                    {
+                        w.Line($"      - {YamlValue.String(group)}");
+                    }
+                }
+            }
+        }
+
         w.Line("orphanedResources:");
         w.Indent();
         w.Line("warn: true");

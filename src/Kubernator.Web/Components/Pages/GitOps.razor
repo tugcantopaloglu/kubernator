@@ -61,6 +61,14 @@
         <InputCheckbox id="cns" @bind-Value="form.CreateNamespace" />
     </div>
     <div class="form-row">
+        <label for="defaultRoles">Default roles</label>
+        <InputCheckbox id="defaultRoles" @bind-Value="form.DefaultRoles" />
+        <label for="adminGroups">Admin groups</label>
+        <InputText id="adminGroups" @bind-Value="form.AdminGroupsCsv" placeholder="comma-separated" />
+        <label for="readonlyGroups">Read-only groups</label>
+        <InputText id="readonlyGroups" @bind-Value="form.ReadonlyGroupsCsv" placeholder="comma-separated" />
+    </div>
+    <div class="form-row">
         <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
     </div>
     @if (error is not null)
@@ -100,6 +108,9 @@
         public bool SelfHeal { get; set; } = true;
         public bool Prune { get; set; } = true;
         public bool CreateNamespace { get; set; } = true;
+        public bool DefaultRoles { get; set; } = true;
+        public string AdminGroupsCsv { get; set; } = string.Empty;
+        public string ReadonlyGroupsCsv { get; set; } = string.Empty;
     }
 
     private readonly Form form = new();
@@ -139,6 +150,11 @@
                 ? System.IO.Path.Combine(resolved, ".kubernator", "argocd")
                 : System.IO.Path.GetFullPath(form.OutputDirectory!);
 
+            var projectName = string.IsNullOrWhiteSpace(form.ProjectName) ? plan.ImageName : form.ProjectName!;
+            var roles = form.DefaultRoles
+                ? BuildRoles(projectName, form.AdminGroupsCsv, form.ReadonlyGroupsCsv)
+                : [];
+
             result = await GitOpsService.GenerateAsync(plan, new GitOpsOptions
             {
                 OutputDirectory = output,
@@ -154,7 +170,8 @@
                 AutomatedSync = form.AutomatedSync,
                 SelfHeal = form.SelfHeal,
                 Prune = form.Prune,
-                CreateNamespace = form.CreateNamespace
+                CreateNamespace = form.CreateNamespace,
+                Roles = roles
             });
         }
         catch (Exception ex)
@@ -167,4 +184,28 @@
             busy = false;
         }
     }
+
+    private static IReadOnlyList<ProjectRole> BuildRoles(string projectName, string adminCsv, string readonlyCsv)
+    {
+        var defaults = ProjectRoleDefaults.ReadonlyAndAdmin(projectName);
+        var adminGroups = SplitCsv(adminCsv);
+        var readonlyGroups = SplitCsv(readonlyCsv);
+        var result = new List<ProjectRole>();
+        foreach (var role in defaults)
+        {
+            var groups = role.Name switch
+            {
+                "admin" => adminGroups,
+                "readonly" => readonlyGroups,
+                _ => (IReadOnlyList<string>)[]
+            };
+            result.Add(role with { Groups = groups });
+        }
+        return result;
+    }
+
+    private static IReadOnlyList<string> SplitCsv(string csv) =>
+        string.IsNullOrWhiteSpace(csv)
+            ? []
+            : csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

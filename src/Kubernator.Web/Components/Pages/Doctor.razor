@@ -1,5 +1,6 @@
 @page "/doctor"
 @rendermode InteractiveServer
+@implements IDisposable
 @inject IDiagnosticsService Diagnostics
 
 <PageTitle>doctor · kubernator</PageTitle>
@@ -9,6 +10,14 @@
 
 <div class="form-row">
     <button type="button" @onclick="Run" disabled="@busy">@(busy ? "probing…" : "run probe")</button>
+    <label for="auto">Auto-refresh</label>
+    <InputCheckbox id="auto" @bind-Value="autoRefresh" @bind-Value:after="OnAutoRefreshChanged" />
+    <label for="interval">Interval (s)</label>
+    <InputNumber id="interval" @bind-Value="intervalSeconds" @bind-Value:after="OnIntervalChanged" />
+    @if (lastRefreshed is not null)
+    {
+        <span class="muted">last: @lastRefreshed.Value.ToLocalTime().ToString("HH:mm:ss")</span>
+    }
 </div>
 
 @if (report is not null)
@@ -58,21 +67,46 @@
 @code {
     private DiagnosticReport? report;
     private bool busy;
+    private bool autoRefresh;
+    private int intervalSeconds = 30;
+    private DateTimeOffset? lastRefreshed;
+    private System.Threading.Timer? timer;
 
     protected override async Task OnInitializedAsync() => await Run();
 
     private async Task Run()
     {
+        if (busy) return;
         busy = true;
         try
         {
             report = await Diagnostics.RunAsync();
+            lastRefreshed = DateTimeOffset.UtcNow;
         }
         finally
         {
             busy = false;
         }
     }
+
+    private void OnAutoRefreshChanged() => RestartTimer();
+
+    private void OnIntervalChanged() => RestartTimer();
+
+    private void RestartTimer()
+    {
+        timer?.Dispose();
+        timer = null;
+        if (!autoRefresh) return;
+        var ms = Math.Max(5, intervalSeconds) * 1000;
+        timer = new System.Threading.Timer(_ => InvokeAsync(async () =>
+        {
+            await Run();
+            StateHasChanged();
+        }), null, ms, ms);
+    }
+
+    public void Dispose() => timer?.Dispose();
 
     private static string StatusClass(DiagnosticStatus s) => s switch
     {

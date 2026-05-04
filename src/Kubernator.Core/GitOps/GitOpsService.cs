@@ -16,8 +16,12 @@ public sealed class GitOpsService : IGitOpsService
         var appName = SanitizeName(options.ApplicationName ?? plan.ImageName);
         var projectName = SanitizeName(options.ProjectName ?? appName);
 
-        var application = ArgoCdEmitter.ApplicationYaml(plan, options, appName, projectName);
-        var project = ArgoCdEmitter.AppProjectYaml(plan, options, projectName);
+        var resolvedOptions = options.Roles.Count == 0
+            ? options with { Roles = ProjectRoleDefaults.ReadonlyAndAdmin(projectName) }
+            : options;
+
+        var application = ArgoCdEmitter.ApplicationYaml(plan, resolvedOptions, appName, projectName);
+        var project = ArgoCdEmitter.AppProjectYaml(plan, resolvedOptions, projectName);
 
         var written = new List<string>();
 

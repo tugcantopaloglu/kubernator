@@ -11,7 +11,12 @@
     <div class="form-row">
         <label for="src">Source</label>
         <InputText id="src" @bind-Value="form.Source" placeholder="https://example.com/kubernator/release.json or C:/path/release.json" />
+        <label for="rid">RID override</label>
+        <InputText id="rid" @bind-Value="form.RuntimeIdentifier" placeholder="(auto)" />
+    </div>
+    <div class="form-row">
         <button type="submit" disabled="@busy">@(busy ? "checking…" : "check")</button>
+        <button type="button" disabled="@(!CanApply)" @onclick="HandleApply">@(applying ? "applying…" : "apply update")</button>
     </div>
     @if (error is not null)
     {
@@ -65,8 +70,41 @@
                 }
             </tbody>
         </table>
+    </section>
+}
 
-        <p class="muted">apply via CLI: <code>kubernator update apply --source @form.Source</code></p>
+@if (logEntries.Count > 0)
+{
+    <section class="result">
+        <h2>apply log</h2>
+        <ul class="file-list">
+            @foreach (var entry in logEntries)
+            {
+                <li><code>@entry</code></li>
+            }
+        </ul>
+    </section>
+}
+
+@if (applyResult is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>installed</h3>
+                <p><code>@applyResult.NewExecutablePath</code></p>
+                <p class="muted">version: @applyResult.ToVersion</p>
+            </div>
+            <div class="card">
+                <h3>previous</h3>
+                <p><code>@applyResult.OldExecutablePath</code></p>
+            </div>
+            <div class="card">
+                <h3>sha256</h3>
+                <p><code>@applyResult.Sha256</code></p>
+            </div>
+        </div>
+        <p class="ok">restart kubernator to use the new version</p>
     </section>
 }
 
@@ -74,12 +112,18 @@
     private sealed class Form
     {
         public string Source { get; set; } = string.Empty;
+        public string? RuntimeIdentifier { get; set; }
     }
 
     private readonly Form form = new();
     private UpdateCheckResult? result;
+    private UpdateApplyResult? applyResult;
+    private readonly List<string> logEntries = new();
     private string? error;
     private bool busy;
+    private bool applying;
+
+    private bool CanApply => result is { UpgradeAvailable: true } && !busy && !applying;
 
     private async Task HandleCheck()
     {
@@ -91,6 +135,8 @@
         error = null;
         busy = true;
         result = null;
+        applyResult = null;
+        logEntries.Clear();
         try
         {
             result = await Updates.CheckAsync(form.Source);
@@ -102,6 +148,37 @@
         finally
         {
             busy = false;
+        }
+    }
+
+    private async Task HandleApply()
+    {
+        if (string.IsNullOrWhiteSpace(form.Source))
+        {
+            error = "source is required";
+            return;
+        }
+        error = null;
+        applying = true;
+        applyResult = null;
+        logEntries.Clear();
+        var progress = new Progress<string>(line =>
+        {
+            logEntries.Add(line);
+            InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            var rid = string.IsNullOrWhiteSpace(form.RuntimeIdentifier) ? null : form.RuntimeIdentifier;
+            applyResult = await Updates.ApplyAsync(form.Source, rid, progress);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            applying = false;
         }
     }
 }

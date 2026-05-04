@@ -70,6 +70,18 @@ internal sealed class GitOpsCommand : AsyncCommand<GitOpsCommand.Settings>
         [CommandOption("--allowed-source <repo>")]
         public string[]? AllowedSources { get; init; }
 
+        [CommandOption("--no-default-roles")]
+        [Description("Skip emitting the default readonly + admin AppProject roles.")]
+        public bool NoDefaultRoles { get; init; }
+
+        [CommandOption("--admin-group <group>")]
+        [Description("Subject (oidc group / sso) granted the admin role. Repeatable.")]
+        public string[]? AdminGroups { get; init; }
+
+        [CommandOption("--readonly-group <group>")]
+        [Description("Subject (oidc group / sso) granted the readonly role. Repeatable.")]
+        public string[]? ReadonlyGroups { get; init; }
+
         [CommandOption("-o|--output <dir>")]
         public string? OutputDirectory { get; init; }
 
@@ -101,6 +113,8 @@ internal sealed class GitOpsCommand : AsyncCommand<GitOpsCommand.Settings>
         };
 
         var output = settings.OutputDirectory ?? System.IO.Path.Combine(path, ".kubernator", "argocd");
+        var projectName = settings.ProjectName ?? plan.ImageName;
+        var roles = BuildRoles(projectName, settings);
 
         var options = new GitOpsOptions
         {
@@ -118,7 +132,8 @@ internal sealed class GitOpsCommand : AsyncCommand<GitOpsCommand.Settings>
             SelfHeal = !settings.NoSelfHeal,
             Prune = !settings.NoPrune,
             CreateNamespace = !settings.NoCreateNamespace,
-            AllowedSourceRepos = settings.AllowedSources is { Length: > 0 } ? settings.AllowedSources : ["*"]
+            AllowedSourceRepos = settings.AllowedSources is { Length: > 0 } ? settings.AllowedSources : ["*"],
+            Roles = roles
         };
 
         var result = await gitops.GenerateAsync(plan, options);
@@ -131,5 +146,27 @@ internal sealed class GitOpsCommand : AsyncCommand<GitOpsCommand.Settings>
         }
         AnsiConsole.Write(table);
         return 0;
+    }
+
+    private static IReadOnlyList<ProjectRole> BuildRoles(string projectName, Settings settings)
+    {
+        if (settings.NoDefaultRoles)
+        {
+            return [];
+        }
+
+        var defaults = ProjectRoleDefaults.ReadonlyAndAdmin(projectName);
+        var withGroups = new List<ProjectRole>();
+        foreach (var role in defaults)
+        {
+            var groups = role.Name switch
+            {
+                "admin" => (IReadOnlyList<string>)(settings.AdminGroups ?? []),
+                "readonly" => (IReadOnlyList<string>)(settings.ReadonlyGroups ?? []),
+                _ => []
+            };
+            withGroups.Add(role with { Groups = groups });
+        }
+        return withGroups;
     }
 }
