@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
-    <NoWarn>$(NoWarn);CA1848;CA1303;CA1014;CA1716;CA2007;CA1031;CA1707;CA1859</NoWarn>
+    <NoWarn>$(NoWarn);CA1848;CA1303;CA1014;CA1716;CA2007;CA1031;CA1707;CA1859;CA1873;IL3000</NoWarn>
     <NeutralLanguage>en-US</NeutralLanguage>
     <InvariantGlobalization>true</InvariantGlobalization>
     <Deterministic>true</Deterministic>
