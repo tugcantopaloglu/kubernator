@@ -95,6 +95,10 @@ app.Configure(config =>
         .WithExample("validate", "./publish")
         .WithExample("validate", "./publish", "--probe-path", "/health", "--keep-cluster");
 
+    config.AddCommand<DoctorCommand>("doctor")
+        .WithDescription("Probe the local environment (engine, kubectl, kind, vulndb, state directory).")
+        .WithExample("doctor");
+
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")
         .WithAlias("ui");

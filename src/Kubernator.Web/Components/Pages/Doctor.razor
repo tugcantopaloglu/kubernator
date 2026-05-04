@@ -1,0 +1,84 @@
+@page "/doctor"
+@rendermode InteractiveServer
+@inject IDiagnosticsService Diagnostics
+
+<PageTitle>doctor · kubernator</PageTitle>
+
+<h1>Doctor</h1>
+<p class="subtitle">Probe the local environment for the tools and state kubernator depends on.</p>
+
+<div class="form-row">
+    <button type="button" @onclick="Run" disabled="@busy">@(busy ? "probing…" : "run probe")</button>
+</div>
+
+@if (report is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>os</h3>
+                <p>@report.OperatingSystem</p>
+                <p class="muted">arch: @report.Architecture</p>
+            </div>
+            <div class="card">
+                <h3>runtime</h3>
+                <p>@report.DotNetRuntime</p>
+            </div>
+            <div class="card">
+                <h3>tool</h3>
+                <p>kubernator @report.ToolVersion</p>
+                <p class="muted">overall: @(report.Ok ? "ok" : "issues found")</p>
+            </div>
+        </div>
+
+        <table class="findings">
+            <thead>
+                <tr>
+                    <th>status</th>
+                    <th>check</th>
+                    <th>message</th>
+                    <th>hint</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in report.Checks)
+                {
+                    <tr class="severity-@StatusClass(c.Status)">
+                        <td>@c.Status.ToString().ToLowerInvariant()</td>
+                        <td>@c.Name</td>
+                        <td>@c.Message</td>
+                        <td>@(c.Hint ?? "-")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+}
+
+@code {
+    private DiagnosticReport? report;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await Run();
+
+    private async Task Run()
+    {
+        busy = true;
+        try
+        {
+            report = await Diagnostics.RunAsync();
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string StatusClass(DiagnosticStatus s) => s switch
+    {
+        DiagnosticStatus.Fail => "high",
+        DiagnosticStatus.Warn => "medium",
+        DiagnosticStatus.Ok => "ok",
+        _ => "info"
+    };
+}

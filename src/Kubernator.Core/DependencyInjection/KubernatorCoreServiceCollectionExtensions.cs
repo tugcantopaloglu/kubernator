@@ -13,6 +13,7 @@ using Kubernator.Core.Detection.Java;
 using Kubernator.Core.Detection.Node;
 using Kubernator.Core.Detection.Python;
 using Kubernator.Core.Detection.Static;
+using Kubernator.Core.Diagnostics;
 using Kubernator.Core.Generation;
 using Kubernator.Core.GitOps;
 using Kubernator.Core.Helm;
@@ -60,6 +61,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();
         services.TryAddSingleton<IValidator, KindValidator>();
+        services.TryAddSingleton<IDiagnosticsService, DiagnosticsService>();
 
         return services;
     }
