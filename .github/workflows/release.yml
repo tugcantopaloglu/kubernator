@@ -1,0 +1,186 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Semver to publish (e.g. 0.2.0). Tag-driven runs ignore this."
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: publish ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: linux-x64
+            os: ubuntu-latest
+            archive: tar.gz
+          - rid: linux-arm64
+            os: ubuntu-latest
+            archive: tar.gz
+          - rid: osx-x64
+            os: macos-latest
+            archive: tar.gz
+          - rid: osx-arm64
+            os: macos-latest
+            archive: tar.gz
+          - rid: win-x64
+            os: windows-latest
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: publish single-file
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="publish/${{ matrix.rid }}"
+          mkdir -p "$OUT"
+          dotnet publish src/Kubernator.Cli \
+            -c Release \
+            -r ${{ matrix.rid }} \
+            --self-contained true \
+            -p:Version=${{ steps.ver.outputs.version }} \
+            -p:PublishSingleFile=true \
+            -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true \
+            -o "$OUT"
+
+      - name: archive
+        id: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="kubernator-${{ steps.ver.outputs.version }}-${{ matrix.rid }}"
+          OUT="publish/${{ matrix.rid }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd "$OUT" && 7z a -tzip "../../$NAME.zip" "kubernator.exe")
+            FILE="$NAME.zip"
+          else
+            tar -C "$OUT" -czf "$NAME.tar.gz" "kubernator"
+            FILE="$NAME.tar.gz"
+          fi
+          SHA=$(shasum -a 256 "$FILE" | awk '{print $1}')
+          SIZE=$(wc -c < "$FILE" | tr -d ' ')
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "size=$SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: write artifact metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          cat > "meta/${{ matrix.rid }}.json" <<EOF
+          {
+            "rid": "${{ matrix.rid }}",
+            "fileName": "${{ steps.archive.outputs.file }}",
+            "sha256": "${{ steps.archive.outputs.sha256 }}",
+            "size": ${{ steps.archive.outputs.size }}
+          }
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kubernator-${{ matrix.rid }}
+          path: |
+            ${{ steps.archive.outputs.file }}
+            meta/${{ matrix.rid }}.json
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: release
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: assemble release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.ver.outputs.version }}"
+          PUBLISHED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          BASE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}"
+
+          ARTS="["
+          FIRST=1
+          for meta in dist/meta/*.json; do
+            [ -f "$meta" ] || continue
+            RID=$(jq -r .rid "$meta")
+            FILE=$(jq -r .fileName "$meta")
+            SHA=$(jq -r .sha256 "$meta")
+            SIZE=$(jq -r .size "$meta")
+            if [ $FIRST -eq 1 ]; then FIRST=0; else ARTS="$ARTS,"; fi
+            ARTS="$ARTS{\"rid\":\"$RID\",\"url\":\"$BASE_URL/$FILE\",\"fileName\":\"$FILE\",\"sha256\":\"$SHA\",\"size\":$SIZE}"
+          done
+          ARTS="$ARTS]"
+
+          cat > release.json <<EOF
+          {
+            "version": "$VERSION",
+            "publishedAt": "$PUBLISHED",
+            "notes": "kubernator $VERSION",
+            "artifacts": $ARTS
+          }
+          EOF
+          jq . release.json
+          (cd dist && find . -maxdepth 2 -type f \( -name '*.zip' -o -name '*.tar.gz' \) | sort)
+
+      - name: collect assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          find dist -maxdepth 2 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} assets/ \;
+          cp release.json assets/
+          (cd assets && shasum -a 256 *.zip *.tar.gz 2>/dev/null > checksums.txt || true)
+          ls -la assets
+
+      - name: create GitHub release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          files: assets/*
+          generate_release_notes: true

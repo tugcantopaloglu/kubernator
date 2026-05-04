@@ -22,6 +22,7 @@ using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Pipelines;
 using Kubernator.Core.Strategy;
+using Kubernator.Core.Updates;
 using Kubernator.Core.Validation;
 using Kubernator.Core.Vulnerabilities;
 using Microsoft.Extensions.DependencyInjection;
@@ -62,6 +63,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();
         services.TryAddSingleton<IValidator, KindValidator>();
         services.TryAddSingleton<IDiagnosticsService, DiagnosticsService>();
+        services.AddHttpClient<IUpdateService, UpdateService>();
 
         return services;
     }

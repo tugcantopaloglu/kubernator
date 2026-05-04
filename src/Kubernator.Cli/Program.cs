@@ -1,6 +1,7 @@
 using Kubernator.Cli.Commands;
 using Kubernator.Cli.Infrastructure;
 using Kubernator.Core.DependencyInjection;
+using Kubernator.Core.Updates;
 using Kubernator.Runtime.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -21,7 +22,7 @@ var app = new CommandApp(registrar);
 app.Configure(config =>
 {
     config.SetApplicationName("kubernator");
-    config.SetApplicationVersion("0.1.0");
+    config.SetApplicationVersion(KubernatorVersion.Current);
     config.PropagateExceptions();
 
     config.AddCommand<AnalyzeCommand>("analyze")
@@ -98,6 +99,15 @@ app.Configure(config =>
     config.AddCommand<DoctorCommand>("doctor")
         .WithDescription("Probe the local environment (engine, kubectl, kind, vulndb, state directory).")
         .WithExample("doctor");
+
+    config.AddCommand<VersionCommand>("version")
+        .WithDescription("Print the kubernator version and platform identifier.")
+        .WithExample("version");
+
+    config.AddCommand<UpdateCommand>("update")
+        .WithDescription("Check for or apply a self-update from a release manifest URL or local path.")
+        .WithExample("update", "check", "--source", "https://example.com/kubernator/release.json")
+        .WithExample("update", "apply", "--source", "./release.json");
 
     config.AddCommand<WizardCommand>("wizard")
         .WithDescription("Run the interactive wizard.")

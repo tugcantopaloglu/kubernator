@@ -1,0 +1,107 @@
+@page "/update"
+@rendermode InteractiveServer
+@inject IUpdateService Updates
+
+<PageTitle>update · kubernator</PageTitle>
+
+<h1>Update</h1>
+<p class="subtitle">Check for new releases against a manifest URL or local file (air-gapped friendly).</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleCheck" class="form">
+    <div class="form-row">
+        <label for="src">Source</label>
+        <InputText id="src" @bind-Value="form.Source" placeholder="https://example.com/kubernator/release.json or C:/path/release.json" />
+        <button type="submit" disabled="@busy">@(busy ? "checking…" : "check")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>current</h3>
+                <p><code>@result.CurrentVersion</code></p>
+            </div>
+            <div class="card">
+                <h3>latest</h3>
+                <p><code>@result.Manifest.Version</code></p>
+                <p class="muted">@result.Manifest.PublishedAt:O</p>
+            </div>
+            <div class="card">
+                <h3>status</h3>
+                <p class="@(result.UpgradeAvailable ? "ok" : "muted")">@(result.UpgradeAvailable ? "upgrade available" : "up to date")</p>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(result.Manifest.Notes))
+        {
+            <p class="muted">notes: @result.Manifest.Notes</p>
+        }
+
+        <h2>artifacts</h2>
+        <table class="findings">
+            <thead>
+                <tr>
+                    <th>rid</th>
+                    <th>file</th>
+                    <th>size</th>
+                    <th>sha256</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var a in result.Manifest.Artifacts)
+                {
+                    <tr>
+                        <td><code>@a.RuntimeIdentifier</code></td>
+                        <td><code>@(a.FileName ?? a.Url)</code></td>
+                        <td>@a.SizeBytes</td>
+                        <td><code>@a.Sha256</code></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <p class="muted">apply via CLI: <code>kubernator update apply --source @form.Source</code></p>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Source { get; set; } = string.Empty;
+    }
+
+    private readonly Form form = new();
+    private UpdateCheckResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleCheck()
+    {
+        if (string.IsNullOrWhiteSpace(form.Source))
+        {
+            error = "source is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            result = await Updates.CheckAsync(form.Source);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}
