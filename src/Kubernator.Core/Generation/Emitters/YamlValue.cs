@@ -54,7 +54,7 @@ internal static class YamlValue
         }
         foreach (var c in value)
         {
-            if (c is ':' or '#' or '\n' or '\r' or '\t')
+            if (c is ':' or '#' or '\n' or '\r' or '\t' or ' ' or '*' or '?' or '&' or '!' or '|' or '>')
             {
                 return true;
             }

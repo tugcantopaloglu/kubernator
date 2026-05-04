@@ -78,6 +78,11 @@ app.Configure(config =>
         .WithExample("gitops", "./publish", "--repo-url", "https://git.example.com/org/repo")
         .WithExample("gitops", "./publish", "--repo-url", "https://git.example.com/org/repo", "--source-kind", "helm", "--source-path", "charts/app");
 
+    config.AddCommand<TlsRotateCommand>("tls-rotate")
+        .WithDescription("Generate ServiceAccount + Role + RoleBinding + CronJob to periodically rotate a self-signed TLS Secret.")
+        .WithExample("tls-rotate", "tls-cert", "--hostname", "app.example.com")
+        .WithExample("tls-rotate", "tls-cert", "--hostname", "app.example.com", "--namespace", "prod", "--schedule", "0 0 */60 * *");
+
     config.AddCommand<VulnDbCommand>("vulndb")
         .WithDescription("Manage the offline vulnerability database (status / update / import-zip / import / export).")
         .WithExample("vulndb", "update")

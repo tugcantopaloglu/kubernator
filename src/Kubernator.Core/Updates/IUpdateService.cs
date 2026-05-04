@@ -7,6 +7,7 @@ public interface IUpdateService
     Task<UpdateApplyResult> ApplyAsync(
         string sourceUrl,
         string? runtimeIdentifierOverride,
+        string? targetExecutablePath,
         IProgress<string>? progress,
         CancellationToken ct = default);
 }

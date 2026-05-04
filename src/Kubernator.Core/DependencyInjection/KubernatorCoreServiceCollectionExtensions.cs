@@ -22,6 +22,7 @@ using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Pipelines;
 using Kubernator.Core.Strategy;
+using Kubernator.Core.Tls.Rotation;
 using Kubernator.Core.Updates;
 using Kubernator.Core.Validation;
 using Kubernator.Core.Vulnerabilities;
@@ -58,6 +59,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IHelmService, HelmService>();
         services.TryAddSingleton<IKustomizeService, KustomizeService>();
         services.TryAddSingleton<IGitOpsService, GitOpsService>();
+        services.TryAddSingleton<ITlsRotationService, TlsRotationService>();
         services.TryAddSingleton<IVulnerabilityDatabase>(_ => FileVulnerabilityDatabase.Default());
         services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();

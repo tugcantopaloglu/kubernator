@@ -1,0 +1,135 @@
+@page "/tls-rotation"
+@rendermode InteractiveServer
+@inject ITlsRotationService Rotation
+
+<PageTitle>tls-rotation · kubernator</PageTitle>
+
+<h1>TLS rotation</h1>
+<p class="subtitle">Generate a CronJob (with its ServiceAccount + Role + RoleBinding) that periodically renews a self-signed <code>kubernetes.io/tls</code> Secret.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="secret">Secret name</label>
+        <InputText id="secret" @bind-Value="form.SecretName" placeholder="tls-cert" />
+        <label for="ns">Namespace</label>
+        <InputText id="ns" @bind-Value="form.Namespace" />
+    </div>
+    <div class="form-row">
+        <label for="host">Hostname</label>
+        <InputText id="host" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        <label for="extra">Extra hostnames (csv)</label>
+        <InputText id="extra" @bind-Value="form.ExtraHostsCsv" placeholder="api.example.com,admin.example.com" />
+    </div>
+    <div class="form-row">
+        <label for="schedule">Cron schedule</label>
+        <InputText id="schedule" @bind-Value="form.Schedule" />
+        <label for="days">Days valid</label>
+        <InputNumber id="days" @bind-Value="form.DaysValid" />
+    </div>
+    <div class="form-row">
+        <label for="image">Image</label>
+        <InputText id="image" @bind-Value="form.Image" />
+    </div>
+    <div class="form-row">
+        <label for="output">Output directory</label>
+        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: ./.kubernator/tls-rotation/<secret>)" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (result is not null)
+{
+    <section class="result">
+        <div class="card-grid">
+            <div class="card">
+                <h3>output</h3>
+                <p><code>@result.OutputDirectory</code></p>
+            </div>
+            <div class="card">
+                <h3>service account</h3>
+                <p><code>@result.ResolvedServiceAccountName</code></p>
+            </div>
+            <div class="card">
+                <h3>cronjob</h3>
+                <p><code>@result.ResolvedCronJobName</code></p>
+            </div>
+        </div>
+
+        <h2>files</h2>
+        <ul class="file-list">
+            @foreach (var f in result.WrittenFiles)
+            {
+                <li><code>@System.IO.Path.GetRelativePath(result.OutputDirectory, f)</code></li>
+            }
+        </ul>
+
+        <p class="muted">apply with <code>kubectl apply -f @result.OutputDirectory</code></p>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string SecretName { get; set; } = "tls-cert";
+        public string Namespace { get; set; } = "default";
+        public string Hostname { get; set; } = string.Empty;
+        public string ExtraHostsCsv { get; set; } = string.Empty;
+        public string Schedule { get; set; } = "0 3 1 * *";
+        public int DaysValid { get; set; } = 90;
+        public string Image { get; set; } = "cgr.dev/chainguard/wolfi-base:latest";
+        public string? OutputDirectory { get; set; }
+    }
+
+    private readonly Form form = new();
+    private TlsRotationResult? result;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.SecretName) || string.IsNullOrWhiteSpace(form.Hostname))
+        {
+            error = "secret name and hostname are required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        try
+        {
+            var output = string.IsNullOrEmpty(form.OutputDirectory)
+                ? System.IO.Path.Combine(Environment.CurrentDirectory, ".kubernator", "tls-rotation", form.SecretName)
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            var extras = string.IsNullOrWhiteSpace(form.ExtraHostsCsv)
+                ? Array.Empty<string>()
+                : form.ExtraHostsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            result = await Rotation.GenerateAsync(new TlsRotationOptions
+            {
+                OutputDirectory = output,
+                SecretName = form.SecretName,
+                Hostname = form.Hostname,
+                AdditionalHostnames = extras,
+                Namespace = form.Namespace,
+                Schedule = form.Schedule,
+                DaysValid = form.DaysValid,
+                Image = form.Image
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

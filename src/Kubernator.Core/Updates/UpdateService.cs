@@ -37,6 +37,7 @@ public sealed class UpdateService : IUpdateService
     public async Task<UpdateApplyResult> ApplyAsync(
         string sourceUrl,
         string? runtimeIdentifierOverride,
+        string? targetExecutablePath,
         IProgress<string>? progress,
         CancellationToken ct = default)
     {
@@ -57,8 +58,12 @@ public sealed class UpdateService : IUpdateService
         var artifactUri = ResolveArtifactUri(sourceUrl, artifact.Url);
         progress?.Report($"downloading {artifactUri}");
 
-        var entryPath = ResolveCurrentExecutablePath();
+        var entryPath = string.IsNullOrWhiteSpace(targetExecutablePath)
+            ? ResolveCurrentExecutablePath()
+            : Path.GetFullPath(targetExecutablePath);
+        progress?.Report($"target executable: {entryPath}");
         var entryDir = Path.GetDirectoryName(entryPath) ?? Environment.CurrentDirectory;
+        Directory.CreateDirectory(entryDir);
         var newPath = Path.Combine(entryDir, Path.GetFileName(entryPath) + ".new");
 
         var actualSha = await DownloadAsync(artifactUri, newPath, artifact.SizeBytes, ct);

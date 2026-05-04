@@ -28,6 +28,10 @@ internal sealed class UpdateCommand : AsyncCommand<UpdateCommand.Settings>
         [Description("Override target runtime identifier (e.g., linux-x64, win-x64).")]
         public string? RuntimeIdentifier { get; init; }
 
+        [CommandOption("--target-path <path>")]
+        [Description("Update a binary at this path instead of the running executable.")]
+        public string? TargetPath { get; init; }
+
         public override ValidationResult Validate()
         {
             var mode = Mode.ToLowerInvariant();
@@ -74,7 +78,7 @@ internal sealed class UpdateCommand : AsyncCommand<UpdateCommand.Settings>
         var progress = new Progress<string>(line => AnsiConsole.MarkupLine($"[grey]update[/]    {Markup.Escape(line)}"));
         try
         {
-            var result = await updates.ApplyAsync(source, settings.RuntimeIdentifier, progress);
+            var result = await updates.ApplyAsync(source, settings.RuntimeIdentifier, settings.TargetPath, progress);
             AnsiConsole.MarkupLine($"[green]upgraded[/]   {Markup.Escape(result.NewExecutablePath)}");
             AnsiConsole.MarkupLine($"[grey]version[/]    {Markup.Escape(result.ToVersion)}");
             AnsiConsole.MarkupLine($"[grey]sha256[/]     {Markup.Escape(result.Sha256)}");
