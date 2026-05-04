@@ -15,6 +15,7 @@ using Kubernator.Core.Detection.Python;
 using Kubernator.Core.Detection.Static;
 using Kubernator.Core.Generation;
 using Kubernator.Core.Helm;
+using Kubernator.Core.Kustomize;
 using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Pipelines;
@@ -51,6 +52,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<ICosignSigner, CosignSigner>();
         services.TryAddSingleton<IPipelineService, PipelineService>();
         services.TryAddSingleton<IHelmService, HelmService>();
+        services.TryAddSingleton<IKustomizeService, KustomizeService>();
         services.TryAddSingleton<IVulnerabilityDatabase>(_ => FileVulnerabilityDatabase.Default());
         services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
 

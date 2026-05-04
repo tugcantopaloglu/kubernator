@@ -67,6 +67,11 @@ app.Configure(config =>
         .WithExample("helm", "./publish", "-o", "./charts")
         .WithExample("helm", "./publish", "--package", "--hostname", "app.example.com", "--tls", "self-signed");
 
+    config.AddCommand<KustomizeCommand>("kustomize")
+        .WithDescription("Generate a Kustomize base + overlays for production / staging / dev.")
+        .WithExample("kustomize", "./publish", "-o", "./kustomize")
+        .WithExample("kustomize", "./publish", "--overlay", "production", "--overlay", "staging");
+
     config.AddCommand<VulnDbCommand>("vulndb")
         .WithDescription("Manage the offline vulnerability database (status / update / import-zip / import / export).")
         .WithExample("vulndb", "update")
