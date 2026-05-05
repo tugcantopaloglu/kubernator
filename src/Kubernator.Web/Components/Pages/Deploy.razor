@@ -1,0 +1,301 @@
+@page "/deploy"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IGenerationService Generation
+@inject Kubernator.Core.Deployment.IClusterApplier Applier
+
+<PageTitle>deploy · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>deploy</h1>
+    <p class="subtitle">apply generated manifests to a kubectl context — local kind, test cluster, or production.</p>
+</div>
+
+@if (contextsError is not null)
+{
+    <div class="banner err">
+        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+        <div class="banner-body"><span class="label">kubectl</span>@contextsError</div>
+    </div>
+}
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="d-path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="d-path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
+        <div class="form-row span-2">
+            <label for="d-manifests">manifests directory<span class="opt">  optional, skip regenerate</span></label>
+            <InputText id="d-manifests" @bind-Value="form.ManifestsDirectory" placeholder="(default: regenerate from path)" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>target</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row span-2">
+            <label for="d-ctx">cluster context</label>
+            @if (contexts.Count == 0)
+            {
+                <InputText id="d-ctx" @bind-Value="form.Context" placeholder="kind-kubernator-test" />
+                <span class="hint">no kubectl contexts detected; type one manually.</span>
+            }
+            else
+            {
+                <InputSelect id="d-ctx" @bind-Value="form.Context">
+                    <option value="">(pick a context)</option>
+                    @foreach (var c in contexts)
+                    {
+                        <option value="@c.Name">@c.Name@(c.IsCurrent ? " (current)" : "")@(c.LooksProduction ? " — production" : "")</option>
+                    }
+                </InputSelect>
+            }
+        </div>
+        <div class="form-row">
+            <label for="d-ns">namespace</label>
+            <InputText id="d-ns" @bind-Value="form.Namespace" />
+        </div>
+        <div class="form-row">
+            <label for="d-replicas">replicas<span class="opt">  if regenerating</span></label>
+            <InputNumber id="d-replicas" @bind-Value="form.Replicas" class="input-w-sm" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.DryRun" /> dry run (server-side)</label>
+        <label class="check"><InputCheckbox @bind-Value="form.CreateNamespace" /> create namespace if missing</label>
+    </div>
+
+    @if (LooksProduction)
+    {
+        <div class="banner err" style="margin-top:var(--s-3)">
+            <svg class="ico" width="16" height="16"><use href="#i-warn" /></svg>
+            <div class="banner-body">
+                <span class="label">production</span>
+                context <code>@form.Context</code> looks like a production cluster. tick the box below to confirm.
+            </div>
+        </div>
+        <div class="row" style="gap:16px; margin-top:var(--s-2)">
+            <label class="check"><InputCheckbox @bind-Value="form.AllowProduction" /> i understand i am deploying to production</label>
+        </div>
+    }
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn @(LooksProduction ? "btn-danger" : "btn-primary")" type="submit" disabled="@(busy || !CanDeploy)">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg> }
+            <span>@ButtonLabel</span>
+        </button>
+        <button class="btn btn-ghost" type="button" @onclick="LoadContexts" disabled="@busy">
+            <svg class="ico" width="14" height="14"><use href="#i-update" /></svg>
+            <span>refresh contexts</span>
+        </button>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
+
+@if (log.Count > 0)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result is { Ok: true })
+            {
+                <span class="pill ok"><span class="dot"></span>applied</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
+}
+
+@if (result is not null)
+{
+    <div class="section">
+        <div class="section-head"><h2>result</h2></div>
+        <div class="card-grid">
+            <div class="fact-card">
+                <div class="fact-label">context</div>
+                <div class="fact-value"><code>@result.Context</code></div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">namespace</div>
+                <div class="fact-value"><code>@result.Namespace</code></div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">mode</div>
+                <div class="fact-value">
+                    @if (result.DryRun) { <span class="pill warn"><span class="dot"></span>dry run</span> }
+                    else { <span class="pill ok"><span class="dot"></span>applied</span> }
+                </div>
+            </div>
+        </div>
+
+        @if (result.AppliedResources.Count > 0)
+        {
+            <div class="section-head" style="margin-top:var(--s-5)"><h2>resources</h2></div>
+            <ul class="file-list">
+                @foreach (var line in result.AppliedResources)
+                {
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-disk" /></svg>
+                        <span class="path"><code>@line</code></span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? ManifestsDirectory { get; set; }
+        public string Context { get; set; } = string.Empty;
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public bool DryRun { get; set; }
+        public bool CreateNamespace { get; set; } = true;
+        public bool AllowProduction { get; set; }
+    }
+
+    private readonly Form form = new();
+    private List<Kubernator.Core.Deployment.ClusterContext> contexts = new();
+    private string? contextsError;
+    private string? error;
+    private bool busy;
+    private Kubernator.Core.Deployment.DeployResult? result;
+    private readonly List<string> log = new();
+
+    private bool LooksProduction => !string.IsNullOrEmpty(form.Context) && Kubernator.Core.Deployment.ClusterContext.LooksLikeProduction(form.Context);
+
+    private bool CanDeploy =>
+        !string.IsNullOrWhiteSpace(form.Context)
+        && (!string.IsNullOrWhiteSpace(form.Path) || !string.IsNullOrWhiteSpace(form.ManifestsDirectory))
+        && (!LooksProduction || form.AllowProduction);
+
+    private string ButtonLabel
+    {
+        get
+        {
+            if (busy) return form.DryRun ? "dry-running…" : "deploying…";
+            if (form.DryRun) return "dry run";
+            return LooksProduction ? "deploy to production" : "deploy";
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadContexts();
+
+    private async Task LoadContexts()
+    {
+        contextsError = null;
+        try
+        {
+            var ctxs = await Applier.ListContextsAsync();
+            contexts = ctxs.ToList();
+            if (contexts.Count == 0)
+            {
+                contextsError = "kubectl returned no contexts (kubectl missing? no kubeconfig?)";
+            }
+            else if (string.IsNullOrEmpty(form.Context))
+            {
+                var current = contexts.FirstOrDefault(c => c.IsCurrent);
+                if (current is not null) form.Context = current.Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            contextsError = ex.Message;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (!CanDeploy)
+        {
+            error = "fill the required fields and confirm production if applicable";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        log.Clear();
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            string manifestsDir;
+            if (!string.IsNullOrWhiteSpace(form.ManifestsDirectory))
+            {
+                manifestsDir = System.IO.Path.GetFullPath(form.ManifestsDirectory);
+            }
+            else
+            {
+                var resolved = System.IO.Path.GetFullPath(form.Path);
+                var descriptor = await Analysis.AnalyzeAsync(resolved);
+                var plan = Strategy.Plan(descriptor);
+                var output = System.IO.Path.Combine(resolved, ".kubernator", "deploy");
+                manifestsDir = System.IO.Path.Combine(output, "kubernetes");
+                progress.Report("generating manifests");
+                await Generation.GenerateAsync(plan, new GenerationOptions
+                {
+                    OutputDirectory = output,
+                    Namespace = form.Namespace,
+                    Replicas = form.Replicas,
+                    OverwriteExisting = true
+                });
+            }
+
+            result = await Applier.ApplyAsync(new Kubernator.Core.Deployment.DeployOptions
+            {
+                ManifestsDirectory = manifestsDir,
+                Context = form.Context,
+                Namespace = form.Namespace,
+                DryRun = form.DryRun,
+                AllowProduction = form.AllowProduction,
+                CreateNamespace = form.CreateNamespace
+            }, progress);
+
+            if (!result.Ok && result.Errors.Count > 0)
+            {
+                error = string.Join(" · ", result.Errors);
+            }
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}
