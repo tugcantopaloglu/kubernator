@@ -12,10 +12,16 @@ internal static class KustomizeEmitter
         w.Line("kind: Kustomization");
         w.Line($"namespace: {YamlValue.String(ns)}");
         w.Line($"namePrefix: \"\"");
-        w.Line("commonLabels:");
+        w.Line("labels:");
+        w.Indent();
+        w.Line("- includeSelectors: true");
+        w.Indent();
+        w.Line("pairs:");
         w.Indent();
         w.Line($"app.kubernetes.io/name: {YamlValue.String(name)}");
         w.Line("app.kubernetes.io/managed-by: kubernator");
+        w.Outdent();
+        w.Outdent();
         w.Outdent();
         w.Line("resources:");
         w.Indent();
