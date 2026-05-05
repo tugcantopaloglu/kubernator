@@ -4,59 +4,84 @@
 
 <PageTitle>analyze · kubernator</PageTitle>
 
-<h1>Analyze</h1>
-<p class="subtitle">Detect the application at a path and inspect runtime, ports, and dependencies.</p>
+<div class="page-header">
+    <h1><span class="crumb">inspect</span>analyze</h1>
+    <p class="subtitle">detect runtime, framework, ports, and dependencies from a publish directory.</p>
+</div>
 
 <EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
-        <button type="submit" disabled="@busy">@(busy ? "analyzing…" : "analyze")</button>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
     </div>
+
+    <div class="row" style="gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-scope" /></svg>
+            }
+            <span>@(busy ? "analyzing…" : "analyze")</span>
+        </button>
+    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (descriptor is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>summary</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>kind</h3>
-                <p>@descriptor.Kind / @descriptor.Flavor</p>
+            <div class="fact-card">
+                <div class="fact-label">kind</div>
+                <div class="fact-value">@descriptor.Kind / @descriptor.Flavor</div>
             </div>
-            <div class="card">
-                <h3>runtime</h3>
-                <p>@descriptor.Runtime.Name @descriptor.Runtime.Version</p>
-                <p class="muted">tfm: @(descriptor.Runtime.Tfm ?? "?") · rid: @(descriptor.Runtime.RuntimeIdentifier ?? "(framework-dependent)")</p>
+            <div class="fact-card">
+                <div class="fact-label">runtime</div>
+                <div class="fact-value">@descriptor.Runtime.Name @descriptor.Runtime.Version</div>
+                <div class="muted" style="font-size:var(--fs-11)">tfm: @(descriptor.Runtime.Tfm ?? "?") · rid: @(descriptor.Runtime.RuntimeIdentifier ?? "(framework-dependent)")</div>
             </div>
-            <div class="card">
-                <h3>network</h3>
-                <p>ports: @(descriptor.Network.Ports.Count == 0 ? "(none)" : string.Join(", ", descriptor.Network.Ports))</p>
-                <p class="muted">http: @(descriptor.Network.ListensHttp ? "yes" : "no") · https: @(descriptor.Network.ListensHttps ? "yes" : "no")</p>
+            <div class="fact-card">
+                <div class="fact-label">network</div>
+                <div class="fact-value">ports: @(descriptor.Network.Ports.Count == 0 ? "(none)" : string.Join(", ", descriptor.Network.Ports))</div>
+                <div class="muted" style="font-size:var(--fs-11)">http: @(descriptor.Network.ListensHttp ? "yes" : "no") · https: @(descriptor.Network.ListensHttps ? "yes" : "no")</div>
             </div>
-            <div class="card">
-                <h3>dependencies</h3>
-                <p>@descriptor.Dependencies.Managed.Count managed · @descriptor.Dependencies.Native.Count native</p>
-                <p class="muted">requires icu: @(descriptor.Dependencies.RequiresIcu ? "yes" : "no")</p>
+            <div class="fact-card">
+                <div class="fact-label">dependencies</div>
+                <div class="fact-value">@descriptor.Dependencies.Managed.Count managed · @descriptor.Dependencies.Native.Count native</div>
+                <div class="muted" style="font-size:var(--fs-11)">requires icu: @(descriptor.Dependencies.RequiresIcu ? "yes" : "no")</div>
             </div>
         </div>
+    </div>
 
-        @if (descriptor.Warnings.Count > 0)
-        {
-            <div class="warnings">
-                <h3>warnings</h3>
-                <ul>
-                    @foreach (var w in descriptor.Warnings)
-                    {
-                        <li>@w</li>
-                    }
-                </ul>
-            </div>
-        }
-    </section>
+    @if (descriptor.Warnings.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>warnings</h2></div>
+            <ul class="file-list">
+                @foreach (var w in descriptor.Warnings)
+                {
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-warn" /></svg>
+                        <span class="path">@w</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
 }
 
 @code {

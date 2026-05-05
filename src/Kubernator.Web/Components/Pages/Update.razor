@@ -4,112 +4,156 @@
 
 <PageTitle>update · kubernator</PageTitle>
 
-<h1>Update</h1>
-<p class="subtitle">Check for new releases against a manifest URL or local file (air-gapped friendly).</p>
+<div class="page-header">
+    <h1><span class="crumb">tool</span>update</h1>
+    <p class="subtitle">check for or apply a self-update from a release manifest URL or local file (air-gapped friendly).</p>
+</div>
 
 <EditForm Model="@form" OnValidSubmit="@HandleCheck" class="form">
-    <div class="form-row">
-        <label for="src">Source</label>
-        <InputText id="src" @bind-Value="form.Source" placeholder="https://example.com/kubernator/release.json or C:/path/release.json" />
-        <label for="rid">RID override</label>
-        <InputText id="rid" @bind-Value="form.RuntimeIdentifier" placeholder="(auto)" />
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="src">source<span class="opt">  url or local path</span></label>
+            <InputText id="src" @bind-Value="form.Source" placeholder="https://example.com/release.json or C:/path/release.json" />
+        </div>
+        <div class="form-row">
+            <label for="rid">rid override</label>
+            <InputText id="rid" @bind-Value="form.RuntimeIdentifier" placeholder="(auto)" />
+        </div>
+        <div class="form-row">
+            <label for="target">target path</label>
+            <InputText id="target" @bind-Value="form.TargetPath" placeholder="(auto: running executable)" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="target">Target path</label>
-        <InputText id="target" @bind-Value="form.TargetPath" placeholder="(auto: running executable)" />
+
+    <div class="row" style="gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-update" /></svg>
+            }
+            <span>@(busy ? "checking…" : "check")</span>
+        </button>
+        <button class="btn btn-secondary" type="button" disabled="@(!CanApply)" @onclick="HandleApply">
+            @if (applying)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-download" /></svg>
+            }
+            <span>@(applying ? "applying…" : "apply update")</span>
+        </button>
     </div>
-    <div class="form-row">
-        <button type="submit" disabled="@busy">@(busy ? "checking…" : "check")</button>
-        <button type="button" disabled="@(!CanApply)" @onclick="HandleApply">@(applying ? "applying…" : "apply update")</button>
-    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (result is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>release</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>current</h3>
-                <p><code>@result.CurrentVersion</code></p>
+            <div class="fact-card">
+                <div class="fact-label">current</div>
+                <div class="fact-value"><code>@result.CurrentVersion</code></div>
             </div>
-            <div class="card">
-                <h3>latest</h3>
-                <p><code>@result.Manifest.Version</code></p>
-                <p class="muted">@result.Manifest.PublishedAt:O</p>
+            <div class="fact-card">
+                <div class="fact-label">latest</div>
+                <div class="fact-value"><code>@result.Manifest.Version</code></div>
+                <div class="muted" style="font-size:var(--fs-11)">@result.Manifest.PublishedAt.ToString("O")</div>
             </div>
-            <div class="card">
-                <h3>status</h3>
-                <p class="@(result.UpgradeAvailable ? "ok" : "muted")">@(result.UpgradeAvailable ? "upgrade available" : "up to date")</p>
+            <div class="fact-card">
+                <div class="fact-label">status</div>
+                <div class="fact-value">
+                    @if (result.UpgradeAvailable)
+                    {
+                        <span class="pill ok"><span class="dot"></span>upgrade available</span>
+                    }
+                    else
+                    {
+                        <span class="pill muted"><span class="dot"></span>up to date</span>
+                    }
+                </div>
             </div>
         </div>
 
         @if (!string.IsNullOrEmpty(result.Manifest.Notes))
         {
-            <p class="muted">notes: @result.Manifest.Notes</p>
+            <p class="muted" style="margin-top:var(--s-3); font-size:var(--fs-12)">notes: @result.Manifest.Notes</p>
         }
+    </div>
 
-        <h2>artifacts</h2>
-        <table class="findings">
-            <thead>
-                <tr>
-                    <th>rid</th>
-                    <th>file</th>
-                    <th>size</th>
-                    <th>sha256</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var a in result.Manifest.Artifacts)
-                {
+    <div class="section">
+        <div class="section-head"><h2>artifacts</h2></div>
+        <div class="table-wrap">
+            <table class="t">
+                <thead>
                     <tr>
-                        <td><code>@a.RuntimeIdentifier</code></td>
-                        <td><code>@(a.FileName ?? a.Url)</code></td>
-                        <td>@a.SizeBytes</td>
-                        <td><code>@a.Sha256</code></td>
+                        <th>rid</th>
+                        <th>file</th>
+                        <th class="num" style="width:120px">size</th>
+                        <th>sha256</th>
                     </tr>
-                }
-            </tbody>
-        </table>
-    </section>
+                </thead>
+                <tbody>
+                    @foreach (var a in result.Manifest.Artifacts)
+                    {
+                        <tr>
+                            <td><code>@a.RuntimeIdentifier</code></td>
+                            <td><code>@(a.FileName ?? a.Url)</code></td>
+                            <td class="num">@a.SizeBytes</td>
+                            <td><code style="font-size:var(--fs-11)">@a.Sha256</code></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
 
 @if (logEntries.Count > 0)
 {
-    <section class="result">
-        <h2>apply log</h2>
-        <ul class="file-list">
-            @foreach (var entry in logEntries)
-            {
-                <li><code>@entry</code></li>
-            }
-        </ul>
-    </section>
+    <div class="section">
+        <div class="section-head"><h2>apply log</h2><span class="meta">@logEntries.Count line(s)</span></div>
+        <div class="log" aria-live="polite">@string.Join('\n', logEntries)</div>
+    </div>
 }
 
 @if (applyResult is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>installed</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>installed</h3>
-                <p><code>@applyResult.NewExecutablePath</code></p>
-                <p class="muted">version: @applyResult.ToVersion</p>
+            <div class="fact-card">
+                <div class="fact-label">installed at</div>
+                <div class="fact-value"><code>@applyResult.NewExecutablePath</code></div>
+                <div class="muted" style="font-size:var(--fs-11)">version: @applyResult.ToVersion</div>
             </div>
-            <div class="card">
-                <h3>previous</h3>
-                <p><code>@applyResult.OldExecutablePath</code></p>
+            <div class="fact-card">
+                <div class="fact-label">previous</div>
+                <div class="fact-value"><code>@applyResult.OldExecutablePath</code></div>
             </div>
-            <div class="card">
-                <h3>sha256</h3>
-                <p><code>@applyResult.Sha256</code></p>
+            <div class="fact-card">
+                <div class="fact-label">sha256</div>
+                <div class="fact-value"><code style="font-size:var(--fs-11)">@applyResult.Sha256</code></div>
             </div>
         </div>
-        <p class="ok">restart kubernator to use the new version</p>
-    </section>
+        <div class="banner info" style="margin-top:var(--s-3)">
+            <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+            <div class="banner-body">restart kubernator to use the new version.</div>
+        </div>
+    </div>
 }
 
 @code {
@@ -167,7 +211,7 @@
         applying = true;
         applyResult = null;
         logEntries.Clear();
-        var progress = new Progress<string>(line =>
+        IProgress<string> progress = new Progress<string>(line =>
         {
             logEntries.Add(line);
             InvokeAsync(StateHasChanged);

@@ -7,92 +7,140 @@
 
 <PageTitle>gitops · kubernator</PageTitle>
 
-<h1>GitOps</h1>
-<p class="subtitle">Generate Argo CD <code>Application</code> + <code>AppProject</code> CRs for continuous delivery.</p>
+<div class="page-header">
+    <h1><span class="crumb">render</span>gitops</h1>
+    <p class="subtitle">render Argo CD <code>Application</code> + <code>AppProject</code> for continuous delivery.</p>
+</div>
 
 <EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
+        <div class="form-row span-2">
+            <label for="repo">repo url</label>
+            <InputText id="repo" @bind-Value="form.RepoUrl" placeholder="https://git.example.com/org/repo" />
+        </div>
+        <div class="form-row">
+            <label for="rev">target revision</label>
+            <InputText id="rev" @bind-Value="form.TargetRevision" />
+        </div>
+        <div class="form-row">
+            <label for="sourcePath">source path</label>
+            <InputText id="sourcePath" @bind-Value="form.SourcePath" />
+        </div>
+        <div class="form-row">
+            <label for="kind">source kind</label>
+            <InputSelect id="kind" @bind-Value="form.SourceKind">
+                <option value="directory">directory</option>
+                <option value="helm">helm</option>
+                <option value="kustomize">kustomize</option>
+            </InputSelect>
+        </div>
+        <div class="form-row">
+            <label for="output">output directory</label>
+            <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/argocd)" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="repo">Repo URL</label>
-        <InputText id="repo" @bind-Value="form.RepoUrl" placeholder="https://git.example.com/org/repo" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>destination</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row">
+            <label for="ns">namespace</label>
+            <InputText id="ns" @bind-Value="form.DestinationNamespace" />
+        </div>
+        <div class="form-row">
+            <label for="argo">argo namespace</label>
+            <InputText id="argo" @bind-Value="form.ArgoNamespace" />
+        </div>
+        <div class="form-row span-2">
+            <label for="server">cluster server</label>
+            <InputText id="server" @bind-Value="form.DestinationServer" />
+        </div>
+        <div class="form-row">
+            <label for="app">app name</label>
+            <InputText id="app" @bind-Value="form.AppName" placeholder="(auto)" />
+        </div>
+        <div class="form-row">
+            <label for="proj">project name</label>
+            <InputText id="proj" @bind-Value="form.ProjectName" placeholder="(auto)" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="rev">Target revision</label>
-        <InputText id="rev" @bind-Value="form.TargetRevision" />
-        <label for="sourcePath">Source path</label>
-        <InputText id="sourcePath" @bind-Value="form.SourcePath" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>sync</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.AutomatedSync" /> automated sync</label>
+        <label class="check"><InputCheckbox @bind-Value="form.SelfHeal" /> self-heal</label>
+        <label class="check"><InputCheckbox @bind-Value="form.Prune" /> prune</label>
+        <label class="check"><InputCheckbox @bind-Value="form.CreateNamespace" /> create namespace</label>
     </div>
-    <div class="form-row">
-        <label for="kind">Source kind</label>
-        <InputSelect id="kind" @bind-Value="form.SourceKind">
-            <option value="directory">directory</option>
-            <option value="helm">helm</option>
-            <option value="kustomize">kustomize</option>
-        </InputSelect>
-        <label for="ns">Dest namespace</label>
-        <InputText id="ns" @bind-Value="form.DestinationNamespace" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>rbac</h2></div>
+    <div class="form-grid">
+        <div class="form-row inline">
+            <label class="check"><InputCheckbox @bind-Value="form.DefaultRoles" /> default roles (admin + readonly)</label>
+        </div>
+        <div class="form-row">
+            <label for="adminGroups">admin groups<span class="opt">  csv</span></label>
+            <InputText id="adminGroups" @bind-Value="form.AdminGroupsCsv" />
+        </div>
+        <div class="form-row">
+            <label for="readonlyGroups">read-only groups<span class="opt">  csv</span></label>
+            <InputText id="readonlyGroups" @bind-Value="form.ReadonlyGroupsCsv" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="argo">Argo namespace</label>
-        <InputText id="argo" @bind-Value="form.ArgoNamespace" />
-        <label for="server">Dest server</label>
-        <InputText id="server" @bind-Value="form.DestinationServer" />
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-git" /></svg> }
+            <span>@(busy ? "generating…" : "generate")</span>
+        </button>
     </div>
-    <div class="form-row">
-        <label for="app">App name</label>
-        <InputText id="app" @bind-Value="form.AppName" placeholder="(auto)" />
-        <label for="proj">Project name</label>
-        <InputText id="proj" @bind-Value="form.ProjectName" placeholder="(auto)" />
-    </div>
-    <div class="form-row">
-        <label for="output">Output directory</label>
-        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/argocd)" />
-    </div>
-    <div class="form-row">
-        <label for="auto">Automated sync</label>
-        <InputCheckbox id="auto" @bind-Value="form.AutomatedSync" />
-        <label for="heal">Self-heal</label>
-        <InputCheckbox id="heal" @bind-Value="form.SelfHeal" />
-        <label for="prune">Prune</label>
-        <InputCheckbox id="prune" @bind-Value="form.Prune" />
-        <label for="cns">Create namespace</label>
-        <InputCheckbox id="cns" @bind-Value="form.CreateNamespace" />
-    </div>
-    <div class="form-row">
-        <label for="defaultRoles">Default roles</label>
-        <InputCheckbox id="defaultRoles" @bind-Value="form.DefaultRoles" />
-        <label for="adminGroups">Admin groups</label>
-        <InputText id="adminGroups" @bind-Value="form.AdminGroupsCsv" placeholder="comma-separated" />
-        <label for="readonlyGroups">Read-only groups</label>
-        <InputText id="readonlyGroups" @bind-Value="form.ReadonlyGroupsCsv" placeholder="comma-separated" />
-    </div>
-    <div class="form-row">
-        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate")</button>
-    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (result is not null)
 {
-    <section class="result">
-        <h2>generated files</h2>
+    <div class="section">
+        <div class="section-head">
+            <h2>generated files</h2>
+            <span class="meta">@result.WrittenFiles.Count file(s)</span>
+        </div>
         @if (downloadToken is not null)
         {
-            <p><a class="download-link" href="/download/@downloadToken">download .zip</a></p>
+            <div style="margin-bottom:var(--s-3)">
+                <a class="download-link" href="/download/@downloadToken">
+                    <svg class="ico" width="14" height="14"><use href="#i-download" /></svg>
+                    download .zip
+                </a>
+            </div>
         }
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
             {
-                <li><code>@System.IO.Path.GetRelativePath(Environment.CurrentDirectory, f)</code></li>
+                <li>
+                    <svg class="ico" width="14" height="14"><use href="#i-file" /></svg>
+                    <span class="path"><code>@System.IO.Path.GetRelativePath(Environment.CurrentDirectory, f)</code></span>
+                </li>
             }
         </ul>
-    </section>
+    </div>
 }
 
 @code {

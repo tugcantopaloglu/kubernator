@@ -4,101 +4,147 @@
 
 <PageTitle>sign · kubernator</PageTitle>
 
-<h1>Sign</h1>
-<p class="subtitle">Generate cosign-format ECDSA P-256 keys, sign blobs, and verify signatures — fully offline.</p>
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>sign</h1>
+    <p class="subtitle">cosign-format ECDSA P-256 keys, sign blobs, and verify signatures — fully offline.</p>
+</div>
 
-<section>
-    <h2>generate key pair</h2>
+<div class="section">
+    <div class="section-head"><h2>generate key pair</h2></div>
     <EditForm Model="@keyForm" OnValidSubmit="@HandleKeygen" class="form">
-        <div class="form-row">
-            <label for="kg-out">Output directory</label>
-            <InputText id="kg-out" @bind-Value="keyForm.OutputDirectory" placeholder="C:/keys" />
-            <label for="kg-name">Base name</label>
-            <InputText id="kg-name" @bind-Value="keyForm.BaseName" />
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="kg-out">output directory</label>
+                <InputText id="kg-out" @bind-Value="keyForm.OutputDirectory" placeholder="C:/keys" />
+            </div>
+            <div class="form-row">
+                <label for="kg-name">base name</label>
+                <InputText id="kg-name" @bind-Value="keyForm.BaseName" />
+            </div>
+            <div class="form-row">
+                <label for="kg-pass">passphrase<span class="opt">  optional</span></label>
+                <input id="kg-pass" type="password" @bind="keyForm.Passphrase" />
+            </div>
         </div>
-        <div class="form-row">
-            <label for="kg-pass">Passphrase</label>
-            <InputText id="kg-pass" type="password" @bind-Value="keyForm.Passphrase" placeholder="(optional)" />
-            <button type="submit" disabled="@busyKey">@(busyKey ? "generating…" : "generate")</button>
+        <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit" disabled="@busyKey">
+                @if (busyKey) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-key" /></svg> }
+                <span>@(busyKey ? "generating…" : "generate")</span>
+            </button>
         </div>
         @if (keyError is not null)
         {
-            <p class="error">@keyError</p>
+            <div class="banner err">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body"><span class="label">error</span>@keyError</div>
+            </div>
         }
         @if (keyResult is not null)
         {
-            <div class="card-grid">
-                <div class="card">
-                    <h3>private key</h3>
-                    <p><code>@keyResult.PrivateKeyPath</code></p>
-                    <p class="muted">encrypted: @(keyResult.PrivateKeyEncrypted ? "yes" : "no")</p>
+            <div class="card-grid" style="margin-top:var(--s-3)">
+                <div class="fact-card">
+                    <div class="fact-label">private key</div>
+                    <div class="fact-value"><code>@keyResult.PrivateKeyPath</code></div>
+                    <div class="muted" style="font-size:var(--fs-11)">encrypted: @(keyResult.PrivateKeyEncrypted ? "yes" : "no")</div>
                 </div>
-                <div class="card">
-                    <h3>public key</h3>
-                    <p><code>@keyResult.PublicKeyPath</code></p>
+                <div class="fact-card">
+                    <div class="fact-label">public key</div>
+                    <div class="fact-value"><code>@keyResult.PublicKeyPath</code></div>
                 </div>
             </div>
         }
     </EditForm>
-</section>
+</div>
 
-<section>
-    <h2>sign blob</h2>
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>sign blob</h2></div>
     <EditForm Model="@signForm" OnValidSubmit="@HandleSign" class="form">
-        <div class="form-row">
-            <label for="s-blob">Blob path</label>
-            <InputText id="s-blob" @bind-Value="signForm.BlobPath" placeholder="C:/path/to/file" />
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="s-blob">blob path</label>
+                <InputText id="s-blob" @bind-Value="signForm.BlobPath" placeholder="C:/path/to/file" />
+            </div>
+            <div class="form-row span-2">
+                <label for="s-key">private key</label>
+                <InputText id="s-key" @bind-Value="signForm.PrivateKeyPath" placeholder="C:/keys/cosign.key" />
+            </div>
+            <div class="form-row">
+                <label for="s-pass">passphrase<span class="opt">  optional</span></label>
+                <input id="s-pass" type="password" @bind="signForm.Passphrase" />
+            </div>
         </div>
-        <div class="form-row">
-            <label for="s-key">Private key</label>
-            <InputText id="s-key" @bind-Value="signForm.PrivateKeyPath" placeholder="C:/keys/cosign.key" />
-            <label for="s-pass">Passphrase</label>
-            <InputText id="s-pass" type="password" @bind-Value="signForm.Passphrase" placeholder="(optional)" />
-            <button type="submit" disabled="@busySign">@(busySign ? "signing…" : "sign")</button>
+        <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit" disabled="@busySign">
+                @if (busySign) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg> }
+                <span>@(busySign ? "signing…" : "sign")</span>
+            </button>
         </div>
         @if (signError is not null)
         {
-            <p class="error">@signError</p>
+            <div class="banner err">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body"><span class="label">error</span>@signError</div>
+            </div>
         }
         @if (signResult is not null)
         {
-            <div class="card-grid">
-                <div class="card">
-                    <h3>signature</h3>
-                    <p><code>@signResult.SignaturePath</code></p>
+            <div class="card-grid" style="margin-top:var(--s-3)">
+                <div class="fact-card">
+                    <div class="fact-label">signature</div>
+                    <div class="fact-value"><code>@signResult.SignaturePath</code></div>
                 </div>
-                <div class="card">
-                    <h3>public key copy</h3>
-                    <p><code>@signResult.PublicKeyCopyPath</code></p>
+                <div class="fact-card">
+                    <div class="fact-label">public key copy</div>
+                    <div class="fact-value"><code>@signResult.PublicKeyCopyPath</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">base64</div>
+                    <div class="fact-value"><code style="font-size:var(--fs-11); word-break:break-all">@signResult.SignatureBase64</code></div>
                 </div>
             </div>
-            <p class="muted">base64: <code>@signResult.SignatureBase64</code></p>
         }
     </EditForm>
-</section>
+</div>
 
-<section>
-    <h2>verify blob</h2>
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>verify blob</h2></div>
     <EditForm Model="@verifyForm" OnValidSubmit="@HandleVerify" class="form">
-        <div class="form-row">
-            <label for="v-blob">Blob path</label>
-            <InputText id="v-blob" @bind-Value="verifyForm.BlobPath" />
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="v-blob">blob path</label>
+                <InputText id="v-blob" @bind-Value="verifyForm.BlobPath" />
+            </div>
+            <div class="form-row span-2">
+                <label for="v-sig">signature path</label>
+                <InputText id="v-sig" @bind-Value="verifyForm.SignaturePath" />
+            </div>
+            <div class="form-row span-2">
+                <label for="v-pub">public key path</label>
+                <InputText id="v-pub" @bind-Value="verifyForm.PublicKeyPath" />
+            </div>
         </div>
-        <div class="form-row">
-            <label for="v-sig">Signature path</label>
-            <InputText id="v-sig" @bind-Value="verifyForm.SignaturePath" />
-        </div>
-        <div class="form-row">
-            <label for="v-pub">Public key path</label>
-            <InputText id="v-pub" @bind-Value="verifyForm.PublicKeyPath" />
-            <button type="submit" disabled="@busyVerify">@(busyVerify ? "verifying…" : "verify")</button>
+        <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit" disabled="@busyVerify">
+                @if (busyVerify) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-check2" /></svg> }
+                <span>@(busyVerify ? "verifying…" : "verify")</span>
+            </button>
         </div>
         @if (verifyMessage is not null)
         {
-            <p class="@(verifyOk ? "ok" : "error")">@verifyMessage</p>
+            <div class="banner @(verifyOk ? "info" : "err")">
+                <svg class="ico" width="16" height="16"><use href="#@(verifyOk ? "i-check2" : "i-x")" /></svg>
+                <div class="banner-body">@verifyMessage</div>
+            </div>
         }
     </EditForm>
-</section>
+</div>
 
 @code {
     private sealed class KeyForm

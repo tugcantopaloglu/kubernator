@@ -6,74 +6,116 @@
 
 <PageTitle>scan · kubernator</PageTitle>
 
-<h1>Scan</h1>
-<p class="subtitle">Scan dependencies against the local OSV vulnerability database.</p>
-
-<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
-        <label for="severity">Min severity</label>
-        <InputSelect id="severity" @bind-Value="form.MinSeverity">
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="critical">critical</option>
-        </InputSelect>
-        <button type="submit" disabled="@busy">@(busy ? "scanning…" : "scan")</button>
-    </div>
-    @if (error is not null)
-    {
-        <p class="error">@error</p>
-    }
-</EditForm>
+<div class="page-header">
+    <h1><span class="crumb">verify</span>scan</h1>
+    <p class="subtitle">match dependencies against the local OSV vulnerability database.</p>
+</div>
 
 @if (dbStatus is not null)
 {
-    <p class="muted">database: @dbStatus</p>
+    <div class="banner @(manifestPresent ? "info" : "err")">
+        <svg class="ico" width="16" height="16"><use href="#@(manifestPresent ? "i-database" : "i-warn")" /></svg>
+        <div class="banner-body"><span class="label">database</span>@dbStatus</div>
+    </div>
 }
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
+        <div class="form-row">
+            <label for="severity">min severity</label>
+            <InputSelect id="severity" @bind-Value="form.MinSeverity">
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="critical">critical</option>
+            </InputSelect>
+        </div>
+    </div>
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-bug" /></svg> }
+            <span>@(busy ? "scanning…" : "scan")</span>
+        </button>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
 
 @if (result is not null)
 {
-    <section class="result">
-        <p>
-            <strong>@result.Findings.Count</strong> finding(s) across
-            <strong>@result.PackagesScanned</strong> package(s) (ecosystem <code>@result.Ecosystem</code>)
-        </p>
-
-        @if (result.Findings.Count > 0)
-        {
-            <table class="findings">
-                <thead>
-                    <tr>
-                        <th>severity</th>
-                        <th>id</th>
-                        <th>package</th>
-                        <th>version</th>
-                        <th>fixed in</th>
-                        <th>summary</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var f in result.Findings)
+    <div class="section">
+        <div class="section-head">
+            <h2>summary</h2>
+        </div>
+        <div class="card-grid">
+            <div class="fact-card">
+                <div class="fact-label">findings</div>
+                <div class="fact-value">
+                    @result.Findings.Count
+                    @if (result.Findings.Count == 0)
                     {
-                        <tr class="severity-@f.Severity.ToString().ToLowerInvariant()">
-                            <td>@f.Severity</td>
-                            <td>@f.VulnerabilityId</td>
-                            <td>@f.PackageName</td>
-                            <td>@f.PackageVersion</td>
-                            <td>@(f.FixedIn ?? "-")</td>
-                            <td>@(f.Summary ?? string.Empty)</td>
-                        </tr>
+                        <span class="pill ok" style="margin-left:var(--s-2)"><span class="dot"></span>clean</span>
                     }
-                </tbody>
-            </table>
-        }
-        else
-        {
-            <p class="ok">no known vulnerabilities</p>
-        }
-    </section>
+                </div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">packages scanned</div>
+                <div class="fact-value">@result.PackagesScanned</div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">ecosystem</div>
+                <div class="fact-value"><code>@result.Ecosystem</code></div>
+            </div>
+        </div>
+    </div>
+
+    @if (result.Findings.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>findings</h2></div>
+            <div class="table-wrap">
+                <table class="t">
+                    <thead>
+                        <tr>
+                            <th style="width:90px">severity</th>
+                            <th style="width:200px">id</th>
+                            <th>package</th>
+                            <th>version</th>
+                            <th>fixed in</th>
+                            <th>summary</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var f in result.Findings)
+                        {
+                            <tr>
+                                <td>
+                                    <span class="pill @PillClass(f.Severity)"><span class="dot"></span>@f.Severity.ToString().ToLowerInvariant()</span>
+                                </td>
+                                <td><code>@f.VulnerabilityId</code></td>
+                                <td><code>@f.PackageName</code></td>
+                                <td class="muted">@f.PackageVersion</td>
+                                <td class="muted">@(f.FixedIn ?? "-")</td>
+                                <td>@(f.Summary ?? string.Empty)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -87,14 +129,16 @@
     private ScanResult? result;
     private string? error;
     private string? dbStatus;
+    private bool manifestPresent;
     private bool busy;
 
     protected override async Task OnInitializedAsync()
     {
         var manifest = await Database.GetManifestAsync();
+        manifestPresent = manifest is not null;
         dbStatus = manifest is null
             ? "not present (run kubernator vulndb update or vulndb import)"
-            : $"{manifest.Ecosystems.Count} ecosystems, updated {manifest.UpdatedAt:O}";
+            : $"{manifest.Ecosystems.Count} ecosystem(s), updated {manifest.UpdatedAt:O}";
     }
 
     private async Task HandleSubmit()
@@ -128,4 +172,13 @@
             busy = false;
         }
     }
+
+    private static string PillClass(Severity s) => s switch
+    {
+        Severity.Critical => "fail",
+        Severity.High => "fail",
+        Severity.Medium => "warn",
+        Severity.Low => "info",
+        _ => "muted"
+    };
 }

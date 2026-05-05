@@ -7,90 +7,138 @@
 
 <PageTitle>helm · kubernator</PageTitle>
 
-<h1>Helm</h1>
-<p class="subtitle">Generate a Helm chart (Chart.yaml, values.yaml, templates) from a published application.</p>
+<div class="page-header">
+    <h1><span class="crumb">render</span>helm</h1>
+    <p class="subtitle">render a Helm chart with templates, values, and notes from a published application.</p>
+</div>
 
 <EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
+        <div class="form-row span-2">
+            <label for="output">output directory<span class="opt">  default: &lt;path&gt;/.kubernator/helm</span></label>
+            <InputText id="output" @bind-Value="form.OutputDirectory" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="output">Output directory</label>
-        <InputText id="output" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator/helm)" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>chart</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row">
+            <label for="chartName">chart name</label>
+            <InputText id="chartName" @bind-Value="form.ChartName" placeholder="(auto)" />
+        </div>
+        <div class="form-row">
+            <label for="chartVersion">chart version</label>
+            <InputText id="chartVersion" @bind-Value="form.ChartVersion" />
+        </div>
+        <div class="form-row">
+            <label class="check"><InputCheckbox @bind-Value="form.Package" /> package .tgz</label>
+        </div>
     </div>
-    <div class="form-row">
-        <label for="chartName">Chart name</label>
-        <InputText id="chartName" @bind-Value="form.ChartName" placeholder="(auto)" />
-        <label for="chartVersion">Chart version</label>
-        <InputText id="chartVersion" @bind-Value="form.ChartVersion" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>deployment</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row">
+            <label for="namespace">namespace</label>
+            <InputText id="namespace" @bind-Value="form.Namespace" />
+        </div>
+        <div class="form-row">
+            <label for="replicas">replicas</label>
+            <InputNumber id="replicas" @bind-Value="form.Replicas" class="input-w-sm" />
+        </div>
+        <div class="form-row">
+            <label for="tls">tls mode</label>
+            <InputSelect id="tls" @bind-Value="form.Tls">
+                <option value="">none</option>
+                <option value="self-signed">self-signed</option>
+                <option value="cert-manager">cert-manager</option>
+            </InputSelect>
+        </div>
+        <div class="form-row span-2">
+            <label for="hostname">hostname<span class="opt">  optional</span></label>
+            <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="namespace">Namespace</label>
-        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
-        <label for="replicas">Replicas</label>
-        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>autoscaling</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row"><label for="hpaMin">hpa min</label><InputNumber id="hpaMin" @bind-Value="form.HpaMin" class="input-w-sm" /></div>
+        <div class="form-row"><label for="hpaMax">hpa max</label><InputNumber id="hpaMax" @bind-Value="form.HpaMax" class="input-w-sm" /></div>
+        <div class="form-row"><label for="hpaCpu">hpa cpu %</label><InputNumber id="hpaCpu" @bind-Value="form.HpaCpu" class="input-w-sm" /></div>
     </div>
-    <div class="form-row">
-        <label for="hostname">Hostname (optional)</label>
-        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
-        <label for="tls">TLS</label>
-        <InputSelect id="tls" @bind-Value="form.Tls">
-            <option value="">none</option>
-            <option value="self-signed">self-signed</option>
-            <option value="cert-manager">cert-manager</option>
-        </InputSelect>
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-helm" /></svg> }
+            <span>@(busy ? "generating…" : "generate chart")</span>
+        </button>
     </div>
-    <div class="form-row">
-        <label for="hpaMin">HPA min</label>
-        <InputNumber id="hpaMin" @bind-Value="form.HpaMin" />
-        <label for="hpaMax">HPA max</label>
-        <InputNumber id="hpaMax" @bind-Value="form.HpaMax" />
-        <label for="hpaCpu">HPA cpu %</label>
-        <InputNumber id="hpaCpu" @bind-Value="form.HpaCpu" />
-    </div>
-    <div class="form-row">
-        <label for="package">Package .tgz</label>
-        <InputCheckbox id="package" @bind-Value="form.Package" />
-    </div>
-    <div class="form-row">
-        <button type="submit" disabled="@busy">@(busy ? "generating…" : "generate chart")</button>
-    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (result is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>chart</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>chart directory</h3>
-                <p><code>@result.ChartDirectory</code></p>
+            <div class="fact-card">
+                <div class="fact-label">chart directory</div>
+                <div class="fact-value"><code>@result.ChartDirectory</code></div>
             </div>
             @if (result.PackageFile is not null)
             {
-                <div class="card">
-                    <h3>package</h3>
-                    <p><code>@result.PackageFile</code></p>
+                <div class="fact-card">
+                    <div class="fact-label">package</div>
+                    <div class="fact-value"><code>@result.PackageFile</code></div>
                 </div>
             }
+            <div class="fact-card">
+                <div class="fact-label">files</div>
+                <div class="fact-value">@result.WrittenFiles.Count</div>
+            </div>
         </div>
 
         @if (downloadToken is not null)
         {
-            <p><a class="download-link" href="/download/@downloadToken">download chart .zip</a></p>
+            <div style="margin-top:var(--s-3)">
+                <a class="download-link" href="/download/@downloadToken">
+                    <svg class="ico" width="14" height="14"><use href="#i-download" /></svg>
+                    download chart .zip
+                </a>
+            </div>
         }
-        <h2>files</h2>
+    </div>
+
+    <div class="section">
+        <div class="section-head"><h2>files</h2></div>
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
             {
-                <li><code>@System.IO.Path.GetRelativePath(result.ChartDirectory, f)</code></li>
+                <li>
+                    <svg class="ico" width="14" height="14"><use href="#i-file" /></svg>
+                    <span class="path"><code>@System.IO.Path.GetRelativePath(result.ChartDirectory, f)</code></span>
+                </li>
             }
         </ul>
-    </section>
+    </div>
 }
 
 @code {
@@ -140,11 +188,7 @@
                     "self-signed" => TlsMode.SelfSigned,
                     _ => TlsMode.None
                 };
-                exposure = new ExposureOptions
-                {
-                    PrimaryHostname = form.Hostname!,
-                    TlsMode = mode
-                };
+                exposure = new ExposureOptions { PrimaryHostname = form.Hostname!, TlsMode = mode };
             }
 
             ScalingOptions? scaling = null;

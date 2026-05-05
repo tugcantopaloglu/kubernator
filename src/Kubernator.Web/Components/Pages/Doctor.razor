@@ -5,63 +5,85 @@
 
 <PageTitle>doctor · kubernator</PageTitle>
 
-<h1>Doctor</h1>
-<p class="subtitle">Probe the local environment for the tools and state kubernator depends on.</p>
+<div class="page-header">
+    <h1><span class="crumb">inspect</span>doctor</h1>
+    <p class="subtitle">probe local environment for the tools and state kubernator depends on.</p>
+</div>
 
-<div class="form-row">
-    <button type="button" @onclick="Run" disabled="@busy">@(busy ? "probing…" : "run probe")</button>
-    <label for="auto">Auto-refresh</label>
-    <InputCheckbox id="auto" @bind-Value="autoRefresh" @bind-Value:after="OnAutoRefreshChanged" />
-    <label for="interval">Interval (s)</label>
-    <InputNumber id="interval" @bind-Value="intervalSeconds" @bind-Value:after="OnIntervalChanged" />
+<div class="row wrap" style="gap:12px; align-items:center; margin-bottom:var(--s-4)">
+    <button type="button" class="btn btn-primary" @onclick="Run" disabled="@busy">
+        @if (busy)
+        {
+            <span class="spinner"></span>
+        }
+        else
+        {
+            <svg class="ico" width="14" height="14"><use href="#i-stetho" /></svg>
+        }
+        <span>@(busy ? "probing…" : "run probe")</span>
+    </button>
+    <label class="check"><InputCheckbox @bind-Value="autoRefresh" @bind-Value:after="OnAutoRefreshChanged" /> auto-refresh</label>
+    <label class="label" for="interval">interval (s)</label>
+    <InputNumber id="interval" @bind-Value="intervalSeconds" @bind-Value:after="OnIntervalChanged" class="input-w-sm" />
     @if (lastRefreshed is not null)
     {
-        <span class="muted">last: @lastRefreshed.Value.ToLocalTime().ToString("HH:mm:ss")</span>
+        <span class="muted" style="font-size:var(--fs-12)">last: @lastRefreshed.Value.ToLocalTime().ToString("HH:mm:ss")</span>
     }
 </div>
 
 @if (report is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>environment</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>os</h3>
-                <p>@report.OperatingSystem</p>
-                <p class="muted">arch: @report.Architecture</p>
+            <div class="fact-card">
+                <div class="fact-label">os</div>
+                <div class="fact-value">@report.OperatingSystem</div>
+                <div class="muted" style="font-size:var(--fs-11)">arch: @report.Architecture</div>
             </div>
-            <div class="card">
-                <h3>runtime</h3>
-                <p>@report.DotNetRuntime</p>
+            <div class="fact-card">
+                <div class="fact-label">runtime</div>
+                <div class="fact-value">@report.DotNetRuntime</div>
             </div>
-            <div class="card">
-                <h3>tool</h3>
-                <p>kubernator @report.ToolVersion</p>
-                <p class="muted">overall: @(report.Ok ? "ok" : "issues found")</p>
+            <div class="fact-card">
+                <div class="fact-label">tool</div>
+                <div class="fact-value">kubernator @report.ToolVersion</div>
+                <div class="muted" style="font-size:var(--fs-11)">overall: @(report.Ok ? "ok" : "issues found")</div>
             </div>
         </div>
+    </div>
 
-        <table class="findings">
-            <thead>
-                <tr>
-                    <th>status</th>
-                    <th>check</th>
-                    <th>message</th>
-                    <th>hint</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var c in report.Checks)
-                {
-                    <tr class="severity-@StatusClass(c.Status)">
-                        <td>@c.Status.ToString().ToLowerInvariant()</td>
-                        <td>@c.Name</td>
-                        <td>@c.Message</td>
-                        <td>@(c.Hint ?? "-")</td>
+    <div class="section">
+        <div class="section-head">
+            <h2>checks</h2>
+            <span class="meta">@report.Checks.Count check(s)</span>
+        </div>
+        <div class="table-wrap">
+            <table class="t">
+                <thead>
+                    <tr>
+                        <th style="width:80px">status</th>
+                        <th style="width:140px">check</th>
+                        <th>message</th>
+                        <th>hint</th>
                     </tr>
-                }
-            </tbody>
-        </table>
-    </section>
+                </thead>
+                <tbody>
+                    @foreach (var c in report.Checks)
+                    {
+                        <tr>
+                            <td>
+                                <span class="pill @PillClass(c.Status)"><span class="dot"></span>@c.Status.ToString().ToLowerInvariant()</span>
+                            </td>
+                            <td><code>@c.Name</code></td>
+                            <td>@c.Message</td>
+                            <td class="muted">@(c.Hint ?? "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
 
 @code {
@@ -90,7 +112,6 @@
     }
 
     private void OnAutoRefreshChanged() => RestartTimer();
-
     private void OnIntervalChanged() => RestartTimer();
 
     private void RestartTimer()
@@ -108,10 +129,10 @@
 
     public void Dispose() => timer?.Dispose();
 
-    private static string StatusClass(DiagnosticStatus s) => s switch
+    private static string PillClass(DiagnosticStatus s) => s switch
     {
-        DiagnosticStatus.Fail => "high",
-        DiagnosticStatus.Warn => "medium",
+        DiagnosticStatus.Fail => "fail",
+        DiagnosticStatus.Warn => "warn",
         DiagnosticStatus.Ok => "ok",
         _ => "info"
     };
