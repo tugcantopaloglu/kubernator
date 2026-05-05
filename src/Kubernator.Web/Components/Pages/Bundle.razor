@@ -8,102 +8,173 @@
 
 <PageTitle>bundle · kubernator</PageTitle>
 
-<h1>Bundle</h1>
-<p class="subtitle">Build a signed, air-gapped <code>.kubpack</code> with image tar, manifests, SBOM, and install scripts.</p>
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>bundle</h1>
+    <p class="subtitle">build a signed, air-gapped <code>.kubpack</code> containing image + manifests + sbom.</p>
+</div>
+
+@if (engineStatus is not null)
+{
+    <div class="banner info">
+        <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+        <div class="banner-body"><span class="label">engine</span>@engineStatus</div>
+    </div>
+}
 
 <EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="b-path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="b-path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+            <span class="hint">on the server. no file picker — this is a local tool.</span>
+        </div>
+        <div class="form-row">
+            <label for="b-out">output bundle</label>
+            <InputText id="b-out" @bind-Value="form.OutputBundlePath" placeholder="(default: <name>-<tag>.kubpack)" />
+        </div>
+        <div class="form-row">
+            <label for="b-name">image name</label>
+            <InputText id="b-name" @bind-Value="form.ImageName" placeholder="(auto)" />
+        </div>
+        <div class="form-row">
+            <label for="b-tag">tag</label>
+            <InputText id="b-tag" @bind-Value="form.ImageTag" placeholder="(auto)" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="output">Output bundle</label>
-        <InputText id="output" @bind-Value="form.OutputBundlePath" placeholder="(default: <name>-<tag>.kubpack)" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>deployment</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row">
+            <label for="b-ns">namespace</label>
+            <InputText id="b-ns" @bind-Value="form.Namespace" />
+        </div>
+        <div class="form-row">
+            <label for="b-replicas">replicas</label>
+            <InputNumber id="b-replicas" @bind-Value="form.Replicas" class="input-w-sm" />
+        </div>
+        <div class="form-row">
+            <label for="b-tls">tls mode</label>
+            <InputSelect id="b-tls" @bind-Value="form.Tls">
+                <option value="">none</option>
+                <option value="self-signed">self-signed</option>
+                <option value="cert-manager">cert-manager</option>
+            </InputSelect>
+        </div>
+        <div class="form-row span-2">
+            <label for="b-host">hostname<span class="opt">  optional</span></label>
+            <InputText id="b-host" @bind-Value="form.Hostname" placeholder="app.example.com" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="image">Image name</label>
-        <InputText id="image" @bind-Value="form.ImageName" placeholder="(auto)" />
-        <label for="tag">Image tag</label>
-        <InputText id="tag" @bind-Value="form.ImageTag" placeholder="(auto)" />
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.IncludeSbom" /> include sbom</label>
+        <label class="check"><InputCheckbox @bind-Value="form.KeepScratch" /> keep scratch directory</label>
     </div>
-    <div class="form-row">
-        <label for="namespace">Namespace</label>
-        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
-        <label for="replicas">Replicas</label>
-        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+
+    <div class="row" style="margin-top:8px; gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-package" /></svg>
+            }
+            <span>@(busy ? "bundling…" : "bundle")</span>
+        </button>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator bundle &lt;path&gt;</code></span>
     </div>
-    <div class="form-row">
-        <label for="hostname">Hostname (optional)</label>
-        <InputText id="hostname" @bind-Value="form.Hostname" placeholder="app.example.com" />
-        <label for="tls">TLS</label>
-        <InputSelect id="tls" @bind-Value="form.Tls">
-            <option value="">none</option>
-            <option value="self-signed">self-signed</option>
-            <option value="cert-manager">cert-manager</option>
-        </InputSelect>
-    </div>
-    <div class="form-row">
-        <label for="sbom">Include SBOM</label>
-        <InputCheckbox id="sbom" @bind-Value="form.IncludeSbom" />
-        <label for="keep">Keep scratch</label>
-        <InputCheckbox id="keep" @bind-Value="form.KeepScratch" />
-    </div>
-    <div class="form-row">
-        <button type="submit" disabled="@busy">@(busy ? "bundling…" : "bundle")</button>
-    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
-    }
-    @if (engineStatus is not null)
-    {
-        <p class="muted">engine: @engineStatus</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (log.Count > 0)
 {
-    <section class="result">
-        <h2>progress</h2>
-        <pre class="log">@string.Join('\n', log)</pre>
-    </section>
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill ok"><span class="dot"></span>done</span>
+            }
+            else
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
 }
 
 @if (result is not null)
 {
-    <section class="result">
+    <div class="section">
+        <div class="section-head"><h2>result</h2></div>
         <div class="card-grid">
-            <div class="card">
-                <h3>bundle</h3>
-                <p><code>@result.BundlePath</code></p>
-                <p class="muted">size: @FormatSize(result.BundleSizeBytes)</p>
-                @if (downloadToken is not null)
-                {
-                    <a class="download-link" href="/download/@downloadToken">download .kubpack</a>
-                }
+            <div class="fact-card">
+                <div class="fact-label">bundle</div>
+                <div class="fact-value"><code>@result.BundlePath</code></div>
+                <div class="muted" style="font-size:var(--fs-11)">@FormatSize(result.BundleSizeBytes)</div>
             </div>
-            <div class="card">
-                <h3>sha256</h3>
-                <p><code>@result.BundleSha256</code></p>
+            <div class="fact-card">
+                <div class="fact-label">sha256</div>
+                <div class="fact-value"><code>@result.BundleSha256</code></div>
             </div>
-            <div class="card">
-                <h3>contents</h3>
-                <p>@result.Manifest.Images.Count image(s)</p>
-                <p class="muted">@result.Manifest.Files.Count file(s) · ns: @result.Manifest.KubernetesNamespace</p>
+            <div class="fact-card">
+                <div class="fact-label">namespace</div>
+                <div class="fact-value"><code>@result.Manifest.KubernetesNamespace</code></div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">files</div>
+                <div class="fact-value">@result.Manifest.Files.Count entries · @result.Manifest.Images.Count image(s)</div>
             </div>
         </div>
 
+        @if (downloadToken is not null)
+        {
+            <div style="margin-top:var(--s-3)">
+                <a class="download-link" href="/download/@downloadToken">
+                    <svg class="ico" width="14" height="14"><use href="#i-download" /></svg>
+                    download .kubpack
+                </a>
+            </div>
+        }
+
         @if (result.Manifest.Images.Count > 0)
         {
-            <h2>images</h2>
+            <div class="section-head" style="margin-top:var(--s-5)"><h2>images</h2></div>
             <ul class="file-list">
                 @foreach (var img in result.Manifest.Images)
                 {
-                    <li><code>@img.Reference</code> · @FormatSize(img.SizeBytes)</li>
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-disk" /></svg>
+                        <span class="path"><code>@img.Reference</code></span>
+                        <span class="size">@FormatSize(img.SizeBytes)</span>
+                    </li>
                 }
             </ul>
         }
-    </section>
+    </div>
 }
 
 @code {
@@ -155,7 +226,7 @@
         result = null;
         downloadToken = null;
         log.Clear();
-        var progress = new Progress<string>(msg =>
+        IProgress<string> progress = new Progress<string>(msg =>
         {
             log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
             InvokeAsync(StateHasChanged);

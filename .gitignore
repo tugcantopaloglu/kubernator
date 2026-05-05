@@ -19,3 +19,4 @@ tmp/
 .claude/settings.local.json
 e2e/
 bash.exe.stackdump
+.design-fetch/

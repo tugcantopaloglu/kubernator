@@ -1,0 +1,133 @@
+/* ============================================================
+   kubernator — design tokens
+   mono everywhere, near-black cool-gray, teal accent
+   ============================================================ */
+
+:root {
+  color-scheme: light dark;
+
+  /* type */
+  --font-mono:
+    ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
+
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;   /* body */
+  --fs-16: 16px;
+  --fs-18: 18px;
+  --fs-22: 22px;   /* h1 */
+
+  --lh-tight: 1.25;
+  --lh-body: 1.5;
+
+  --ls-tight: -0.005em;
+  --ls-caps: 0.08em;
+
+  /* spacing — 4px grid */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+
+  /* radii — restrained */
+  --r-sm: 3px;
+  --r-md: 4px;
+  --r-lg: 6px;
+  --r-pill: 999px;
+
+  /* motion */
+  --t-fast: 80ms;
+  --t-base: 120ms;
+  --ease: cubic-bezier(.2, .6, .2, 1);
+
+  /* layout */
+  --sidebar-w: 224px;
+  --topbar-h: 44px;
+  --content-max: 980px;
+}
+
+/* ---------------- DARK (default) ---------------- */
+:root,
+:root[data-theme="dark"] {
+  /* base near-black, cool gray */
+  --bg:           #0b0d10;     /* page */
+  --surface:      #111418;     /* card / sidebar / topbar */
+  --surface-2:    #161a1f;     /* inset (inputs, log) */
+  --surface-3:    #1c2128;     /* hovered nav, code chip */
+
+  --border:       #232830;     /* default border */
+  --border-2:     #2c333d;     /* stronger border (focused, table head) */
+
+  --text:         #e6e9ef;     /* primary */
+  --text-2:       #b4bac4;     /* secondary */
+  --muted:        #7a828e;     /* tertiary / hint */
+  --faint:        #4f5662;     /* disabled */
+
+  /* teal accent (cool, single hue) */
+  --accent:       oklch(78% 0.13 195);  /* ~#3ddbd9 */
+  --accent-2:     oklch(86% 0.10 195);  /* hover */
+  --accent-ink:   #04181a;                /* on accent */
+  --accent-soft:  color-mix(in oklab, oklch(78% 0.13 195) 14%, transparent);
+  --accent-ring:  color-mix(in oklab, oklch(78% 0.13 195) 45%, transparent);
+
+  /* status — same chroma family, hue-shifted, AA on bg */
+  --ok:           oklch(72% 0.16 152);
+  --ok-soft:      color-mix(in oklab, oklch(72% 0.16 152) 16%, transparent);
+  --warn:         oklch(80% 0.14 80);
+  --warn-soft:    color-mix(in oklab, oklch(80% 0.14 80) 16%, transparent);
+  --err:          oklch(70% 0.18 25);
+  --err-soft:     color-mix(in oklab, oklch(70% 0.18 25) 16%, transparent);
+  --info:         oklch(74% 0.10 240);
+  --info-soft:    color-mix(in oklab, oklch(74% 0.10 240) 16%, transparent);
+
+  /* shadows — barely-there */
+  --shadow-1: 0 1px 0 0 rgba(0,0,0,0.4);
+  --shadow-2: 0 4px 16px -8px rgba(0,0,0,0.55), 0 1px 0 0 rgba(0,0,0,0.35);
+
+  /* selection */
+  --selection-bg: color-mix(in oklab, oklch(78% 0.13 195) 35%, transparent);
+}
+
+/* ---------------- LIGHT ---------------- */
+:root[data-theme="light"] {
+  /* warm-leaning paper, almost imperceptible tint */
+  --bg:           #f6f7f8;
+  --surface:      #ffffff;
+  --surface-2:    #f0f2f4;
+  --surface-3:    #e6e9ed;
+
+  --border:       #d8dde3;
+  --border-2:     #c2c9d1;
+
+  --text:         #14171c;
+  --text-2:       #3c424b;
+  --muted:        #6a7280;
+  --faint:        #aab1bb;
+
+  --accent:       oklch(58% 0.12 195);   /* darker teal for AA on white */
+  --accent-2:     oklch(50% 0.13 195);
+  --accent-ink:   #ffffff;
+  --accent-soft:  color-mix(in oklab, oklch(58% 0.12 195) 12%, transparent);
+  --accent-ring:  color-mix(in oklab, oklch(58% 0.12 195) 40%, transparent);
+
+  --ok:           oklch(46% 0.14 152);
+  --ok-soft:      color-mix(in oklab, oklch(46% 0.14 152) 12%, transparent);
+  --warn:         oklch(56% 0.14 70);
+  --warn-soft:    color-mix(in oklab, oklch(56% 0.14 70) 14%, transparent);
+  --err:          oklch(52% 0.18 25);
+  --err-soft:     color-mix(in oklab, oklch(52% 0.18 25) 12%, transparent);
+  --info:         oklch(50% 0.12 240);
+  --info-soft:    color-mix(in oklab, oklch(50% 0.12 240) 12%, transparent);
+
+  --shadow-1: 0 1px 0 0 rgba(20,23,28,0.04);
+  --shadow-2: 0 4px 14px -8px rgba(20,23,28,0.18), 0 1px 0 0 rgba(20,23,28,0.04);
+
+  --selection-bg: color-mix(in oklab, oklch(58% 0.12 195) 22%, transparent);
+}

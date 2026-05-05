@@ -8,69 +8,134 @@
 
 <PageTitle>validate · kubernator</PageTitle>
 
-<h1>Validate</h1>
-<p class="subtitle">Spin up a disposable kind cluster, load the freshly built image, apply the manifests, probe a health endpoint.</p>
+<div class="page-header">
+    <h1><span class="crumb">verify</span>validate</h1>
+    <p class="subtitle">spin up a kind cluster, load the image, apply manifests, and probe a health endpoint end-to-end.</p>
+</div>
+
+<div class="banner info">
+    <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+    <div class="banner-body">
+        <span class="label">requires</span>
+        <code>kind</code> and <code>docker</code> on this host. cluster is created and torn down for each run unless <strong>keep cluster</strong> is set.
+    </div>
+</div>
 
 <EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
-    <div class="form-row">
-        <label for="path">Path</label>
-        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="v-path">path<span class="opt">  publish dir</span></label>
+            <InputText id="v-path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+        </div>
+        <div class="form-row">
+            <label for="v-ns">namespace</label>
+            <InputText id="v-ns" @bind-Value="form.Namespace" />
+        </div>
+        <div class="form-row">
+            <label for="v-replicas">replicas</label>
+            <InputNumber id="v-replicas" @bind-Value="form.Replicas" class="input-w-sm" />
+        </div>
+        <div class="form-row">
+            <label for="v-probe">probe path</label>
+            <InputText id="v-probe" @bind-Value="form.ProbePath" placeholder="/health" />
+        </div>
+        <div class="form-row">
+            <label for="v-cluster">cluster name</label>
+            <InputText id="v-cluster" @bind-Value="form.ClusterName" />
+        </div>
     </div>
-    <div class="form-row">
-        <label for="namespace">Namespace</label>
-        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
-        <label for="replicas">Replicas</label>
-        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+
+    <div class="row wrap" style="gap:16px; margin-top:4px">
+        <label class="check"><InputCheckbox @bind-Value="form.KeepCluster" /> keep cluster after run</label>
+        <label class="check"><InputCheckbox @bind-Value="form.ReuseCluster" /> reuse cluster if present</label>
     </div>
-    <div class="form-row">
-        <label for="probe">Probe path</label>
-        <InputText id="probe" @bind-Value="form.ProbePath" placeholder="/health" />
-        <label for="cluster">Cluster name</label>
-        <InputText id="cluster" @bind-Value="form.ClusterName" placeholder="kubernator-test" />
+
+    <div class="row" style="margin-top:8px; gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-check2" /></svg>
+            }
+            <span>@(busy ? "validating…" : "validate")</span>
+        </button>
     </div>
-    <div class="form-row">
-        <label for="keep">Keep cluster after run</label>
-        <InputCheckbox id="keep" @bind-Value="form.KeepCluster" />
-        <label for="reuse">Reuse existing cluster</label>
-        <InputCheckbox id="reuse" @bind-Value="form.ReuseCluster" />
-    </div>
-    <div class="form-row">
-        <button type="submit" disabled="@busy">@(busy ? "validating…" : "validate")</button>
-    </div>
+
     @if (error is not null)
     {
-        <p class="error">@error</p>
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
     }
 </EditForm>
 
 @if (log.Count > 0)
 {
-    <section class="result">
-        <h2>progress</h2>
-        <pre class="log">@string.Join('\n', log)</pre>
-    </section>
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result is not null && result.Ok)
+            {
+                <span class="pill ok"><span class="dot"></span>passed</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
 }
 
 @if (result is not null)
 {
-    <section class="result">
-        <h2>steps</h2>
-        <ul class="file-list">
-            @foreach (var step in result.Steps)
-            {
-                <li>
-                    <span class="@(step.Ok ? "ok" : "error")">@(step.Ok ? "ok" : "fail")</span>
-                    &nbsp; <code>@step.Name</code>
-                    &nbsp; <span class="muted">@step.Duration.TotalSeconds.ToString("F1")s</span>
-                    @if (!step.Ok && step.Error is not null)
+    <div class="section">
+        <div class="section-head">
+            <h2>steps</h2>
+            <span class="meta">cluster <code>@result.ClusterName</code> @(result.ClusterStillRunning ? "kept" : "deleted")</span>
+        </div>
+        <div class="table-wrap">
+            <table class="t">
+                <thead>
+                    <tr>
+                        <th style="width:80px">status</th>
+                        <th>step</th>
+                        <th class="num" style="width:90px">duration</th>
+                        <th>error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var step in result.Steps)
                     {
-                        <div class="muted">@step.Error</div>
+                        <tr>
+                            <td>
+                                @if (step.Ok)
+                                {
+                                    <span class="pill ok"><span class="dot"></span>ok</span>
+                                }
+                                else
+                                {
+                                    <span class="pill fail"><span class="dot"></span>fail</span>
+                                }
+                            </td>
+                            <td><code>@step.Name</code></td>
+                            <td class="num">@step.Duration.TotalSeconds.ToString("F1")s</td>
+                            <td class="muted">@(step.Error ?? "")</td>
+                        </tr>
                     }
-                </li>
-            }
-        </ul>
-        <p class="muted">cluster: <code>@result.ClusterName</code> @(result.ClusterStillRunning ? "(kept)" : "(deleted)")</p>
-    </section>
+                </tbody>
+            </table>
+        </div>
+    </div>
 }
 
 @code {

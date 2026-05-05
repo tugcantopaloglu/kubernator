@@ -1,11 +1,55 @@
 @inherits LayoutComponentBase
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 
-<div class="page">
+<IconSprite />
+
+<div class="app">
+
+    <header class="topbar">
+        <div class="brand" aria-label="kubernator">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span class="brand-name">kubernator</span>
+            <span class="brand-version">v0.1.0</span>
+        </div>
+
+        <span class="pill muted" title="kubernator state directory">
+            <svg class="ico" width="12" height="12"><use href="#i-folder" /></svg>~/.kubernator
+        </span>
+
+        <span class="spacer"></span>
+
+        <a href="doctor" class="pill ok" title="open doctor">
+            <span class="dot"></span>doctor
+        </a>
+        <span class="muted" style="font-size:var(--fs-12)">·</span>
+        <button class="theme-toggle" data-theme-toggle type="button" aria-label="toggle theme">
+            <svg class="ico" width="14" height="14" data-theme-icon-moon><use href="#i-moon" /></svg>
+            <svg class="ico" width="14" height="14" data-theme-icon-sun style="display:none"><use href="#i-sun" /></svg>
+            <span data-theme-label>dark</span>
+        </button>
+    </header>
+
     <NavMenu />
 
-    <main>
-        <article class="content px-4">
-            @Body
-        </article>
+    <main class="content">
+        @{
+            var bind = Config["bind"] ?? "127.0.0.1:5050";
+            var token = Config["token"];
+            var loopback = bind.StartsWith("127.0.0.1", StringComparison.Ordinal)
+                || bind.StartsWith("localhost", StringComparison.Ordinal)
+                || bind.StartsWith("[::1]", StringComparison.Ordinal);
+        }
+        @if (!loopback && string.IsNullOrEmpty(token))
+        {
+            <div class="banner" role="alert">
+                <svg class="ico" width="16" height="16"><use href="#i-warn" /></svg>
+                <div class="banner-body">
+                    <span class="label">security</span>
+                    web ui is bound to <code>@bind</code> without <code>--token</code>. anyone reachable on this port can drive the tool.
+                </div>
+            </div>
+        }
+
+        @Body
     </main>
 </div>

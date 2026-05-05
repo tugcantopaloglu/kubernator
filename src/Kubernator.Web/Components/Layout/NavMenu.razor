@@ -1,64 +1,128 @@
 @inject NavigationManager Nav
+@implements IDisposable
 
-<nav class="sidebar">
-    <div class="brand">
-        <span class="brand-name">kubernator</span>
-        <span class="brand-version">0.1.0</span>
+<aside class="sidebar">
+
+    <div class="nav-group">
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("")" href="">
+                    <svg class="ico" width="16" height="16"><use href="#i-home" /></svg><span>dashboard</span>
+                </a>
+            </li>
+        </ul>
     </div>
 
-    <ul class="nav-items">
-        <li class="@ActiveClass("")">
-            <a href="">Dashboard</a>
-        </li>
-        <li class="@ActiveClass("analyze")">
-            <a href="analyze">Analyze</a>
-        </li>
-        <li class="@ActiveClass("generate")">
-            <a href="generate">Generate</a>
-        </li>
-        <li class="@ActiveClass("helm")">
-            <a href="helm">Helm</a>
-        </li>
-        <li class="@ActiveClass("kustomize")">
-            <a href="kustomize">Kustomize</a>
-        </li>
-        <li class="@ActiveClass("gitops")">
-            <a href="gitops">GitOps</a>
-        </li>
-        <li class="@ActiveClass("bundle")">
-            <a href="bundle">Bundle</a>
-        </li>
-        <li class="@ActiveClass("sign")">
-            <a href="sign">Sign</a>
-        </li>
-        <li class="@ActiveClass("pipeline")">
-            <a href="pipeline">Pipeline</a>
-        </li>
-        <li class="@ActiveClass("scan")">
-            <a href="scan">Scan</a>
-        </li>
-        <li class="@ActiveClass("tls-rotation")">
-            <a href="tls-rotation">TLS rotation</a>
-        </li>
-        <li class="@ActiveClass("vulndb")">
-            <a href="vulndb">VulnDB</a>
-        </li>
-        <li class="@ActiveClass("validate")">
-            <a href="validate">Validate</a>
-        </li>
-        <li class="@ActiveClass("doctor")">
-            <a href="doctor">Doctor</a>
-        </li>
-        <li class="@ActiveClass("update")">
-            <a href="update">Update</a>
-        </li>
-    </ul>
-</nav>
+    <div class="nav-group">
+        <div class="nav-group-title">inspect</div>
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("analyze")" href="analyze">
+                    <svg class="ico" width="16" height="16"><use href="#i-scope" /></svg><span>analyze</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("doctor")" href="doctor">
+                    <svg class="ico" width="16" height="16"><use href="#i-stetho" /></svg><span>doctor</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("vulndb")" href="vulndb">
+                    <svg class="ico" width="16" height="16"><use href="#i-database" /></svg><span>vulndb</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-title">render</div>
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("generate")" href="generate">
+                    <svg class="ico" width="16" height="16"><use href="#i-file" /></svg><span>generate</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("helm")" href="helm">
+                    <svg class="ico" width="16" height="16"><use href="#i-helm" /></svg><span>helm</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("kustomize")" href="kustomize">
+                    <svg class="ico" width="16" height="16"><use href="#i-layers" /></svg><span>kustomize</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("gitops")" href="gitops">
+                    <svg class="ico" width="16" height="16"><use href="#i-git" /></svg><span>gitops</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("pipeline")" href="pipeline">
+                    <svg class="ico" width="16" height="16"><use href="#i-flow" /></svg><span>pipeline</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("tls-rotation")" href="tls-rotation">
+                    <svg class="ico" width="16" height="16"><use href="#i-cert" /></svg><span>tls rotation</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-title">package &amp; ship</div>
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("bundle")" href="bundle">
+                    <svg class="ico" width="16" height="16"><use href="#i-package" /></svg><span>bundle</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("sign")" href="sign">
+                    <svg class="ico" width="16" height="16"><use href="#i-key" /></svg><span>sign</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-title">verify</div>
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("scan")" href="scan">
+                    <svg class="ico" width="16" height="16"><use href="#i-bug" /></svg><span>scan</span>
+                </a>
+            </li>
+            <li>
+                <a class="nav-item @ActiveClass("validate")" href="validate">
+                    <svg class="ico" width="16" height="16"><use href="#i-check2" /></svg><span>validate</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="nav-group">
+        <div class="nav-group-title">tool</div>
+        <ul class="nav-items">
+            <li>
+                <a class="nav-item @ActiveClass("update")" href="update">
+                    <svg class="ico" width="16" height="16"><use href="#i-update" /></svg><span>update</span>
+                </a>
+            </li>
+        </ul>
+    </div>
+
+</aside>
 
 @code {
+    protected override void OnInitialized() => Nav.LocationChanged += OnLocationChanged;
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs _) => InvokeAsync(StateHasChanged);
+
     private string ActiveClass(string segment)
     {
         var current = new Uri(Nav.Uri).AbsolutePath.Trim('/');
-        return string.Equals(current, segment, StringComparison.OrdinalIgnoreCase) ? "nav-item active" : "nav-item";
+        return string.Equals(current, segment, StringComparison.OrdinalIgnoreCase) ? "active" : string.Empty;
     }
 }

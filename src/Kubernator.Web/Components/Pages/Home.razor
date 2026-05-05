@@ -1,97 +1,109 @@
 @page "/"
 @rendermode InteractiveServer
-@inject IServiceProvider Services
-@inject Microsoft.Extensions.Configuration.IConfiguration Config
 
 <PageTitle>kubernator</PageTitle>
 
-@{
-    var bind = Config["bind"] ?? "127.0.0.1:5050";
-    var token = Config["token"];
-    var loopback = bind.StartsWith("127.0.0.1", StringComparison.Ordinal)
-        || bind.StartsWith("localhost", StringComparison.Ordinal)
-        || bind.StartsWith("[::1]", StringComparison.Ordinal);
-}
+<div class="page-header">
+    <h1>dashboard</h1>
+    <p class="subtitle">build, sign, and ship a hardened kubernetes deployment from a publish directory.</p>
+</div>
 
-@if (!loopback && string.IsNullOrEmpty(token))
-{
-    <div class="warning-banner">
-        Bound to <code>@bind</code> with no <code>--token</code>. Anyone reachable on this port can drive the tool.
-        Restart with <code>--bind 127.0.0.1:5050</code> or pass <code>--token &lt;hex&gt;</code>.
-    </div>
-}
-
-<h1>Dashboard</h1>
-
-<p class="subtitle">Containerize, harden, and ship applications to Kubernetes — even in air-gapped environments.</p>
-
-<div class="card-grid">
-    <div class="card">
-        <h3>analyze</h3>
-        <p>Detect application kind, runtime, ports, dependencies.</p>
-        <a class="card-link" href="analyze">open</a>
-    </div>
-    <div class="card">
-        <h3>generate</h3>
-        <p>Emit Dockerfile, Kubernetes manifests, Ingress, TLS, HPA, PDB.</p>
-        <a class="card-link" href="generate">open</a>
-    </div>
-    <div class="card">
-        <h3>helm</h3>
-        <p>Generate a Helm chart with values, templates, optional package.</p>
-        <a class="card-link" href="helm">open</a>
-    </div>
-    <div class="card">
-        <h3>kustomize</h3>
-        <p>Generate a base + overlays tree for environment-specific patches.</p>
-        <a class="card-link" href="kustomize">open</a>
-    </div>
-    <div class="card">
-        <h3>gitops</h3>
-        <p>Argo CD <code>Application</code> + <code>AppProject</code> CRs for continuous delivery.</p>
-        <a class="card-link" href="gitops">open</a>
-    </div>
-    <div class="card">
-        <h3>bundle</h3>
-        <p>Build a portable <code>.kubpack</code> for air-gapped delivery.</p>
-        <a class="card-link" href="bundle">open</a>
-    </div>
-    <div class="card">
-        <h3>sign</h3>
-        <p>Generate ECDSA P-256 keys, sign blobs, verify signatures offline.</p>
-        <a class="card-link" href="sign">open</a>
-    </div>
-    <div class="card">
-        <h3>pipeline</h3>
-        <p>Emit GitHub Actions, GitLab CI, Azure DevOps, or Tekton files.</p>
-        <a class="card-link" href="pipeline">open</a>
-    </div>
-    <div class="card">
-        <h3>scan</h3>
-        <p>Match dependencies against the local OSV database.</p>
-        <a class="card-link" href="scan">open</a>
-    </div>
-    <div class="card">
-        <h3>tls rotation</h3>
-        <p>CronJob + RBAC that renews a self-signed TLS Secret on a schedule.</p>
-        <a class="card-link" href="tls-rotation">open</a>
-    </div>
-    <div class="card">
-        <h3>vulndb</h3>
-        <p>Inspect, import, and transport the local OSV database.</p>
-        <a class="card-link" href="vulndb">open</a>
-    </div>
-    <div class="card">
-        <h3>validate</h3>
-        <p>End-to-end test on a disposable kind cluster: build, load, apply, probe.</p>
-        <a class="card-link" href="validate">open</a>
+<div class="dash-group">
+    <div class="dash-group-head"><h2>inspect</h2><span class="count">3 tools</span></div>
+    <div class="card-grid dashboard">
+        <a class="card interactive" href="analyze">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-scope" /></svg>analyze</div>
+            <div class="card-body">detect runtime, framework, ports, and dependencies from a publish directory.</div>
+            <div class="card-foot"><span>dotnet · node · python · java · go</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="doctor">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-stetho" /></svg>doctor</div>
+            <div class="card-body">probe local environment — engine, kubectl, kind, vulndb, state directory.</div>
+            <div class="card-foot"><span class="pill ok"><span class="dot"></span>healthy</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="vulndb">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-database" /></svg>vulndb</div>
+            <div class="card-body">inspect, import, and export the offline vulnerability database.</div>
+            <div class="card-foot"><span>osv · offline · scoped</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
     </div>
 </div>
 
-<section class="status">
-    <h2>Status</h2>
-    <ul>
-        <li>Working directory: <code>@Environment.CurrentDirectory</code></li>
-        <li>Kubernetes target: <code>secure registries only (mcr, cgr, gcr, registry.k8s.io)</code></li>
-    </ul>
-</section>
+<div class="dash-group">
+    <div class="dash-group-head"><h2>render</h2><span class="count">6 tools</span></div>
+    <div class="card-grid dashboard">
+        <a class="card interactive" href="generate">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-file" /></svg>generate</div>
+            <div class="card-body">emit a dockerfile and kubernetes manifests for a deployment.</div>
+            <div class="card-foot"><span>deployment · service · ingress · hpa · pdb</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="helm">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-helm" /></svg>helm</div>
+            <div class="card-body">render a helm chart with templates, values, and notes.</div>
+            <div class="card-foot"><span>chart.yaml · templates · values</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="kustomize">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-layers" /></svg>kustomize</div>
+            <div class="card-body">render a base plus optional overlays (dev, staging, prod).</div>
+            <div class="card-foot"><span>base + overlays</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="gitops">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-git" /></svg>gitops</div>
+            <div class="card-body">argo cd <code>application</code> + <code>appproject</code> with sync flags and rbac.</div>
+            <div class="card-foot"><span>argo cd</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="pipeline">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-flow" /></svg>pipeline</div>
+            <div class="card-body">ci/cd configs for github actions, gitlab, azure devops, tekton.</div>
+            <div class="card-foot"><span>4 targets</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="tls-rotation">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-cert" /></svg>tls rotation</div>
+            <div class="card-body">cronjob that renews a self-signed secret on a schedule.</div>
+            <div class="card-foot"><span>serviceaccount · role · rolebinding · cronjob</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+    </div>
+</div>
+
+<div class="dash-group">
+    <div class="dash-group-head"><h2>package &amp; ship</h2><span class="count">2 tools</span></div>
+    <div class="card-grid dashboard">
+        <a class="card interactive" href="bundle">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-package" /></svg>bundle</div>
+            <div class="card-body">pack image, manifests, and sbom into an air-gapped <code>.kubpack</code>.</div>
+            <div class="card-foot"><span>reproducible · multi-arch</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="sign">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-key" /></svg>sign</div>
+            <div class="card-body">cosign-compatible keygen, sign, and verify — single page, three sections.</div>
+            <div class="card-foot"><span>keygen · sign · verify</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+    </div>
+</div>
+
+<div class="dash-group">
+    <div class="dash-group-head"><h2>verify</h2><span class="count">2 tools</span></div>
+    <div class="card-grid dashboard">
+        <a class="card interactive" href="scan">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-bug" /></svg>scan</div>
+            <div class="card-body">match dependencies against the local osv vulnerability database.</div>
+            <div class="card-foot"><span>npm · pypi · maven · go · nuget · cargo</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+        <a class="card interactive" href="validate">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-check2" /></svg>validate</div>
+            <div class="card-body">spin up kind, load image, apply manifests, probe <code>/health</code>.</div>
+            <div class="card-foot"><span>end-to-end</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+    </div>
+</div>
+
+<div class="dash-group">
+    <div class="dash-group-head"><h2>tool</h2><span class="count">1 tool</span></div>
+    <div class="card-grid dashboard">
+        <a class="card interactive" href="update">
+            <div class="card-title"><svg class="ico" width="16" height="16"><use href="#i-update" /></svg>update</div>
+            <div class="card-body">check for or apply a self-update from a release manifest.</div>
+            <div class="card-foot"><span>v0.1.0</span><svg class="arrow ico" width="14" height="14"><use href="#i-arrow-r" /></svg></div>
+        </a>
+    </div>
+</div>
