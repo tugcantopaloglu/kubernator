@@ -1,3 +1,5 @@
+[kubernator](img/kubernator.png)
+
 # kubernator
 
 A .NET 10 command-line tool that turns a published application into a hardened, signed,
@@ -91,27 +93,27 @@ Running `kubernator` with no arguments launches the interactive `wizard`.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `analyze` | Inspect a published output and report the detected runtime, framework, dependencies, and exposed ports. |
-| `generate` | Write a `Dockerfile`, `.dockerignore`, and Kubernetes manifests under `<path>/.kubernator/`. |
-| `build` | Generate, then build the container image with Docker, Podman, or compatible. |
-| `bundle` | Build everything and pack it into an air-gapped `.kubpack` archive. |
-| `verify` | Recompute hashes and (optionally) verify the cosign signature of a bundle. |
-| `keygen` | Produce a cosign-compatible ECDSA P-256 key pair. |
-| `sign` | Sign a bundle with a private key, emitting a detached `.sig` file. |
-| `helm` | Render a Helm chart with parameterized templates; optionally `helm package` it. |
-| `kustomize` | Render a Kustomize base plus `production`, `staging`, and `dev` overlays. |
-| `gitops` | Render Argo CD `Application` and `AppProject` resources for GitOps delivery. |
-| `pipeline` | Generate a CI/CD pipeline for `gh-actions`, `gitlab-ci`, `azure-devops`, or `tekton`. |
+| Command      | Purpose                                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `analyze`    | Inspect a published output and report the detected runtime, framework, dependencies, and exposed ports.               |
+| `generate`   | Write a `Dockerfile`, `.dockerignore`, and Kubernetes manifests under `<path>/.kubernator/`.                          |
+| `build`      | Generate, then build the container image with Docker, Podman, or compatible.                                          |
+| `bundle`     | Build everything and pack it into an air-gapped `.kubpack` archive.                                                   |
+| `verify`     | Recompute hashes and (optionally) verify the cosign signature of a bundle.                                            |
+| `keygen`     | Produce a cosign-compatible ECDSA P-256 key pair.                                                                     |
+| `sign`       | Sign a bundle with a private key, emitting a detached `.sig` file.                                                    |
+| `helm`       | Render a Helm chart with parameterized templates; optionally `helm package` it.                                       |
+| `kustomize`  | Render a Kustomize base plus `production`, `staging`, and `dev` overlays.                                             |
+| `gitops`     | Render Argo CD `Application` and `AppProject` resources for GitOps delivery.                                          |
+| `pipeline`   | Generate a CI/CD pipeline for `gh-actions`, `gitlab-ci`, `azure-devops`, or `tekton`.                                 |
 | `tls-rotate` | Render a `ServiceAccount` + `Role` + `RoleBinding` + `CronJob` that rotates a self-signed TLS `Secret` on a schedule. |
-| `vulndb` | Manage the offline vulnerability database (`status`, `update`, `import-zip`, `import`, `export`). |
-| `scan` | Scan an application against the local vulnerability database, with severity gating. |
-| `validate` | Spin up a kind cluster, load the image, apply the manifests, run a probe. |
-| `doctor` | Probe the environment (engine, kubectl, kind, vulndb, state directory) and report what is missing. |
-| `update` | `update check` or `update apply` against a release manifest URL or local path. |
-| `version` | Print the version and platform identifier. |
-| `wizard` | Interactive flow (alias `ui`). |
+| `vulndb`     | Manage the offline vulnerability database (`status`, `update`, `import-zip`, `import`, `export`).                     |
+| `scan`       | Scan an application against the local vulnerability database, with severity gating.                                   |
+| `validate`   | Spin up a kind cluster, load the image, apply the manifests, run a probe.                                             |
+| `doctor`     | Probe the environment (engine, kubectl, kind, vulndb, state directory) and report what is missing.                    |
+| `update`     | `update check` or `update apply` against a release manifest URL or local path.                                        |
+| `version`    | Print the version and platform identifier.                                                                            |
+| `wizard`     | Interactive flow (alias `ui`).                                                                                        |
 
 Run `kubernator <command> --help` for the full option list of any command.
 
