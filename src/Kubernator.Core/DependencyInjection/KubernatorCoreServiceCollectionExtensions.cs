@@ -64,6 +64,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IVulnerabilityScanner, VulnerabilityScanner>();
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();
         services.TryAddSingleton<IValidator, KindValidator>();
+        services.TryAddSingleton<Deployment.IClusterApplier, Deployment.KubectlClusterApplier>();
         services.TryAddSingleton<IDiagnosticsService, DiagnosticsService>();
         services.AddHttpClient<IUpdateService, UpdateService>();
 
