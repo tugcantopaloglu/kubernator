@@ -1,7 +1,5 @@
 ![kubernator](img/kubernator.png)
 
-# kubernator
-
 A .NET 10 command-line tool that turns a published application into a hardened, signed,
 air-gapped-friendly Kubernetes deployment. It detects what you've built, picks an
 appropriate base image, writes a Dockerfile and Kubernetes manifests, and — if you ask —
@@ -13,6 +11,8 @@ root filesystem, drop all Linux capabilities, default to a NetworkPolicy that de
 egress, and reference container images only from a small allow-list of trusted
 registries (`mcr.microsoft.com`, `cgr.dev/chainguard`, `gcr.io/distroless`,
 `registry.k8s.io`).
+
+![showcase](img/showcase.gif)
 
 ## Status
 
