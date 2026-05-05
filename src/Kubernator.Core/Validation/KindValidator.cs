@@ -34,7 +34,7 @@ public sealed class KindValidator : IValidator
             {
                 var createStep = await RunStepAsync($"kind create cluster ({options.ClusterName})", () =>
                     Run(options.KindBinary, ["create", "cluster", "--name", options.ClusterName, "--wait", "60s"],
-                        ct, TimeSpan.FromMinutes(5)), progress);
+                        ct, TimeSpan.FromMinutes(15)), progress);
                 steps.Add(createStep);
                 if (!createStep.Ok)
                 {
@@ -108,7 +108,7 @@ public sealed class KindValidator : IValidator
         }
     }
 
-    private async Task<ValidationStep> ProbeHttpAsync(
+    private static async Task<ValidationStep> ProbeHttpAsync(
         ValidationOptions options,
         string context,
         int port,
@@ -118,16 +118,53 @@ public sealed class KindValidator : IValidator
         progress?.Report($"http probe {options.HttpProbePath}:{port}");
         var sw = Stopwatch.StartNew();
 
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = options.KubectlBinary,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+        foreach (var arg in new[]
+        {
+            "port-forward",
+            $"deployment/{options.DeploymentName}",
+            $"{port}:{port}",
+            "--context", context,
+            "-n", options.Namespace
+        })
+        {
+            psi.ArgumentList.Add(arg);
+        }
+
+        System.Diagnostics.Process? proc = null;
         try
         {
-            using var portForward = Task.Run(async () =>
-            {
-                await Run(options.KubectlBinary,
-                    ["port-forward", $"deployment/{options.DeploymentName}", $"{port}:{port}", "--context", context, "-n", options.Namespace],
-                    ct, TimeSpan.FromSeconds(30));
-            }, ct);
+            proc = System.Diagnostics.Process.Start(psi)
+                ?? throw new InvalidOperationException("failed to start kubectl port-forward");
 
-            await Task.Delay(TimeSpan.FromSeconds(3), ct);
+            for (var elapsed = TimeSpan.Zero; elapsed < TimeSpan.FromSeconds(15); elapsed += TimeSpan.FromMilliseconds(500))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                if (proc.HasExited)
+                {
+                    var stderr = await proc.StandardError.ReadToEndAsync(ct);
+                    throw new InvalidOperationException(
+                        $"kubectl port-forward exited early ({proc.ExitCode}): {stderr.TrimEnd()}");
+                }
+                try
+                {
+                    using var probe = new System.Net.Sockets.TcpClient();
+                    using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    connectCts.CancelAfter(TimeSpan.FromMilliseconds(300));
+                    await probe.ConnectAsync(System.Net.IPAddress.Loopback, port, connectCts.Token);
+                    break;
+                }
+                catch
+                {
+                }
+            }
 
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             using var response = await http.GetAsync(new Uri($"http://127.0.0.1:{port}{options.HttpProbePath}"), ct);
@@ -151,6 +188,24 @@ public sealed class KindValidator : IValidator
                 Duration = sw.Elapsed,
                 Error = ex.Message
             };
+        }
+        finally
+        {
+            if (proc is not null)
+            {
+                try
+                {
+                    if (!proc.HasExited)
+                    {
+                        proc.Kill(entireProcessTree: true);
+                    }
+                    await proc.WaitForExitAsync(CancellationToken.None);
+                }
+                catch
+                {
+                }
+                proc.Dispose();
+            }
         }
     }
 
