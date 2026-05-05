@@ -54,28 +54,49 @@ public sealed class BundleService : IBundleService
             Directory.CreateDirectory(sbomDir);
         }
 
-        progress?.Report($"resolving image {plan.FullImageReference}");
-        await EnsureImageBuiltAsync(plan, options, engine, progress, ct);
-
-        var imageRef = plan.FullImageReference;
-        var imageInfo = await engine.GetImageAsync(imageRef, ct)
-            ?? throw new InvalidOperationException($"image not found after build: {imageRef}");
-
-        var imageTarName = $"{SanitizeFilename(plan.ImageName)}-{plan.ImageTag}.tar";
-        var imageTarPath = Path.Combine(imagesDir, imageTarName);
-        progress?.Report($"saving image to {imageTarName}");
-        await engine.SaveImageAsync(imageRef, imageTarPath, ct);
-
-        progress?.Report("hashing image tar");
-        var imageHash = await Sha256Hasher.HashFileAsync(imageTarPath, ct);
-        var imageEntry = new ImageEntry
+        var platforms = plan.Platforms.Count > 0 ? plan.Platforms : [string.Empty];
+        if (platforms.Count > 1 && !engine.SupportsMultiPlatform)
         {
-            Reference = imageRef,
-            TarRelativePath = $"images/{imageTarName}",
-            SizeBytes = new FileInfo(imageTarPath).Length,
-            Sha256 = imageHash,
-            ImageId = imageInfo.Id
-        };
+            throw new InvalidOperationException(
+                $"Multi-platform bundle requested ({string.Join(", ", platforms)}) but engine '{engine.Kind}' does not support it.");
+        }
+
+        var imageEntries = new List<ImageEntry>();
+        foreach (var platform in platforms)
+        {
+            var label = string.IsNullOrEmpty(platform) ? "(host)" : platform;
+            progress?.Report($"resolving image {plan.FullImageReference} for {label}");
+            await EnsureImageBuiltAsync(plan, options, engine, platform, progress, ct);
+
+            var imageRef = plan.FullImageReference;
+            var imageInfo = await engine.GetImageAsync(imageRef, ct)
+                ?? throw new InvalidOperationException($"image not found after build: {imageRef}");
+
+            var archSuffix = string.IsNullOrEmpty(platform) ? "" : "-" + ArchSlug(platform);
+            var imageTarName = $"{SanitizeFilename(plan.ImageName)}-{plan.ImageTag}{archSuffix}.tar";
+            var imageTarPath = Path.Combine(imagesDir, imageTarName);
+            progress?.Report($"saving image to {imageTarName}");
+            if (string.IsNullOrEmpty(platform))
+            {
+                await engine.SaveImageAsync(imageRef, imageTarPath, ct);
+            }
+            else
+            {
+                await engine.SaveImageAsync(imageRef, platform, imageTarPath, ct);
+            }
+
+            progress?.Report($"hashing {imageTarName}");
+            var imageHash = await Sha256Hasher.HashFileAsync(imageTarPath, ct);
+            imageEntries.Add(new ImageEntry
+            {
+                Reference = imageRef,
+                TarRelativePath = $"images/{imageTarName}",
+                SizeBytes = new FileInfo(imageTarPath).Length,
+                Sha256 = imageHash,
+                ImageId = imageInfo.Id,
+                Platform = string.IsNullOrEmpty(platform) ? null : platform
+            });
+        }
 
         var ns = options.KubernetesNamespace ?? "default";
         var k8sName = SanitizeKubernetesName(plan.ImageName);
@@ -125,7 +146,7 @@ public sealed class BundleService : IBundleService
                 TargetArch = plan.App.Runtime.TargetArch.ToString(),
                 Tfm = plan.App.Runtime.Tfm ?? string.Empty
             },
-            Images = [imageEntry],
+            Images = imageEntries,
             Files = fileEntries,
             KubernetesNamespace = ns,
             Notes = plan.Notes
@@ -136,8 +157,10 @@ public sealed class BundleService : IBundleService
         await File.WriteAllTextAsync(manifestPath, manifestJson, ct);
 
         var checksumLines = new List<string>();
-        var imageRelativePath = imageEntry.TarRelativePath;
-        checksumLines.Add(Sha256Hasher.FormatChecksumLine(imageHash, imageRelativePath));
+        foreach (var entry in imageEntries.OrderBy(e => e.TarRelativePath, StringComparer.Ordinal))
+        {
+            checksumLines.Add(Sha256Hasher.FormatChecksumLine(entry.Sha256, entry.TarRelativePath));
+        }
         foreach (var entry in fileEntries.OrderBy(e => e.RelativePath, StringComparer.Ordinal))
         {
             checksumLines.Add(Sha256Hasher.FormatChecksumLine(entry.Sha256, entry.RelativePath));
@@ -270,20 +293,27 @@ public sealed class BundleService : IBundleService
         BuildPlan plan,
         BundleOptions options,
         IContainerEngine engine,
+        string platform,
         IProgress<string>? progress,
         CancellationToken ct)
     {
-        var existing = await engine.GetImageAsync(plan.FullImageReference, ct);
-        if (existing is not null)
+        var isMultiPlatform = !string.IsNullOrEmpty(platform) && plan.Platforms.Count > 1;
+        if (!isMultiPlatform)
         {
-            progress?.Report("image already present in engine");
-            return;
+            var existing = await engine.GetImageAsync(plan.FullImageReference, ct);
+            if (existing is not null)
+            {
+                progress?.Report("image already present in engine");
+                return;
+            }
         }
         if (!options.BuildIfMissing)
         {
             throw new InvalidOperationException($"image {plan.FullImageReference} not present and BuildIfMissing is false");
         }
-        progress?.Report("building image (no cached layer hit)");
+        progress?.Report(isMultiPlatform
+            ? $"building image for {platform}"
+            : "building image (no cached layer hit)");
 
         var contextDir = Path.Combine(options.ScratchDirectory, "build-context");
         Directory.CreateDirectory(contextDir);
@@ -321,11 +351,20 @@ public sealed class BundleService : IBundleService
             ContextDirectory = contextDir,
             DockerfilePath = dockerfilePath,
             ImageName = plan.ImageName,
-            ImageTag = plan.ImageTag
+            ImageTag = plan.ImageTag,
+            Platforms = string.IsNullOrEmpty(platform) ? [] : [platform]
         };
         await foreach (var _ in engine.BuildAsync(buildCtx, ct))
         {
         }
+    }
+
+    private static string ArchSlug(string platform)
+    {
+        var arch = platform.Contains('/', StringComparison.Ordinal)
+            ? platform[(platform.IndexOf('/', StringComparison.Ordinal) + 1)..]
+            : platform;
+        return arch.Replace('/', '-');
     }
 
     private static List<string> WriteKubernetesManifests(

@@ -23,10 +23,30 @@ internal static class BundleScripts
         echo "verifying bundle integrity"
         sha256sum -c manifest.sha256
 
-        echo "loading container images via $engine"
+        host_arch="$(uname -m)"
+        case "$host_arch" in
+            x86_64|amd64) host_arch=amd64 ;;
+            aarch64|arm64) host_arch=arm64 ;;
+            armv7l|armhf) host_arch=arm ;;
+            i386|i686) host_arch=386 ;;
+        esac
+
+        match=""
         for img in images/*.tar; do
-            "$engine" load -i "$img"
+            case "$img" in
+                *-"$host_arch".tar) match="$img"; break ;;
+            esac
         done
+
+        echo "loading container images via $engine"
+        if [ -n "$match" ]; then
+            echo "  matched host arch ($host_arch): $match"
+            "$engine" load -i "$match"
+        else
+            for img in images/*.tar; do
+                "$engine" load -i "$img"
+            done
+        fi
 
         if command -v kubectl >/dev/null 2>&1; then
             echo "applying kubernetes manifests"
@@ -55,9 +75,24 @@ internal static class BundleScripts
         Write-Host 'verifying bundle integrity'
         & "$dir/verify.ps1"
 
+        $hostArch = switch -Wildcard ($env:PROCESSOR_ARCHITECTURE) {
+            'AMD64' { 'amd64' }
+            'ARM64' { 'arm64' }
+            'x86'   { '386' }
+            default { $env:PROCESSOR_ARCHITECTURE.ToLower() }
+        }
+
+        $images = Get-ChildItem -Path "$dir/images" -Filter '*.tar'
+        $match = $images | Where-Object { $_.BaseName -like "*-$hostArch" } | Select-Object -First 1
+
         Write-Host "loading container images via $engine"
-        Get-ChildItem -Path "$dir/images" -Filter '*.tar' | ForEach-Object {
-            & $engine load -i $_.FullName
+        if ($match) {
+            Write-Host "  matched host arch ($hostArch): $($match.Name)"
+            & $engine load -i $match.FullName
+        } else {
+            foreach ($img in $images) {
+                & $engine load -i $img.FullName
+            }
         }
 
         if (Get-Command kubectl -ErrorAction SilentlyContinue) {
