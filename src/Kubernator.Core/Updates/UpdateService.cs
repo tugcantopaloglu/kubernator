@@ -64,14 +64,30 @@ public sealed class UpdateService : IUpdateService
         progress?.Report($"target executable: {entryPath}");
         var entryDir = Path.GetDirectoryName(entryPath) ?? Environment.CurrentDirectory;
         Directory.CreateDirectory(entryDir);
-        var newPath = Path.Combine(entryDir, Path.GetFileName(entryPath) + ".new");
 
-        var actualSha = await DownloadAsync(artifactUri, newPath, artifact.SizeBytes, ct);
+        var newPath = Path.Combine(entryDir, Path.GetFileName(entryPath) + ".new");
+        var oldPath = entryPath + ".old";
+
+        if (File.Exists(newPath))
+        {
+            File.Delete(newPath);
+        }
+
+        string actualSha;
+        try
+        {
+            actualSha = await DownloadAsync(artifactUri, newPath, artifact.SizeBytes, ct);
+        }
+        catch
+        {
+            TryDelete(newPath);
+            throw;
+        }
         progress?.Report($"sha256: {actualSha}");
 
         if (!string.Equals(actualSha, artifact.Sha256.ToLowerInvariant(), StringComparison.Ordinal))
         {
-            File.Delete(newPath);
+            TryDelete(newPath);
             throw new InvalidOperationException($"sha256 mismatch: expected {artifact.Sha256}, got {actualSha}");
         }
 
@@ -83,16 +99,32 @@ public sealed class UpdateService : IUpdateService
                 UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
         }
 
-        var oldPath = entryPath + ".old";
         if (File.Exists(oldPath))
         {
             File.Delete(oldPath);
         }
+
+        var movedOld = false;
         if (File.Exists(entryPath))
         {
             File.Move(entryPath, oldPath);
+            movedOld = true;
         }
-        File.Move(newPath, entryPath);
+
+        try
+        {
+            File.Move(newPath, entryPath);
+        }
+        catch
+        {
+            if (movedOld)
+            {
+                try { File.Move(oldPath, entryPath); } catch { }
+            }
+            TryDelete(newPath);
+            throw;
+        }
+
         progress?.Report($"installed at {entryPath} (previous kept at {oldPath})");
 
         return new UpdateApplyResult
@@ -103,6 +135,20 @@ public sealed class UpdateService : IUpdateService
             Sha256 = actualSha,
             ToVersion = manifest.Version
         };
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private async Task<ReleaseManifest> ReadManifestAsync(string sourceUrl, CancellationToken ct)
