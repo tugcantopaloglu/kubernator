@@ -178,6 +178,34 @@ public sealed class BundleServiceTests
     }
 
     [Fact]
+    public async Task Same_input_with_source_date_epoch_yields_identical_bundle_hash()
+    {
+        using var temp = TempPublishOutput.Create();
+        var plan = strategy.Plan(SampleApp.AspNet());
+        var engine = new FakeContainerEngine();
+        engine.Register(plan.FullImageReference);
+        var epoch = DateTimeOffset.FromUnixTimeSeconds(1_700_000_000);
+
+        async Task<string> BuildAsync(string suffix)
+        {
+            var bundle = Path.Combine(temp.Path, $"repro-{suffix}.kubpack");
+            var scratch = Path.Combine(temp.Path, $"scratch-{suffix}");
+            var result = await service.CreateAsync(plan, new BundleOptions
+            {
+                OutputBundlePath = bundle,
+                ScratchDirectory = scratch,
+                SourceDateEpoch = epoch
+            }, engine);
+            return result.BundleSha256;
+        }
+
+        var first = await BuildAsync("a");
+        var second = await BuildAsync("b");
+
+        second.Should().Be(first, because: "with a fixed SourceDateEpoch the bundle must be byte-identical");
+    }
+
+    [Fact]
     public async Task Manifest_json_lists_all_files_with_hashes()
     {
         using var temp = TempPublishOutput.Create();

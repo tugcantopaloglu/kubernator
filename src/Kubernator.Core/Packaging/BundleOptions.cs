@@ -13,6 +13,7 @@ public sealed record BundleOptions
     public bool KeepScratch { get; init; }
     public Generation.ScalingOptions? Scaling { get; init; }
     public CompressionLevel Compression { get; init; } = CompressionLevel.Optimal;
+    public DateTimeOffset? SourceDateEpoch { get; init; }
 }
 
 public sealed record BundleResult

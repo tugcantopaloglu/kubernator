@@ -80,11 +80,11 @@ public sealed class BundleService : IBundleService
         {
             await File.WriteAllTextAsync(
                 Path.Combine(sbomDir, $"{k8sName}.cyclonedx.json"),
-                CycloneDxBuilder.Build(plan.App, ToolVersion()),
+                CycloneDxBuilder.Build(plan.App, ToolVersion(), options.SourceDateEpoch),
                 ct);
             await File.WriteAllTextAsync(
                 Path.Combine(sbomDir, $"{k8sName}.spdx.json"),
-                SpdxBuilder.Build(plan.App, ToolVersion()),
+                SpdxBuilder.Build(plan.App, ToolVersion(), options.SourceDateEpoch),
                 ct);
         }
 
@@ -106,7 +106,7 @@ public sealed class BundleService : IBundleService
             SchemaVersion = SchemaVersion,
             Tool = "kubernator",
             ToolVersion = ToolVersion(),
-            CreatedAt = DateTimeOffset.UtcNow,
+            CreatedAt = options.SourceDateEpoch ?? DateTimeOffset.UtcNow,
             App = new AppInfo
             {
                 Name = plan.ImageName,
@@ -141,7 +141,11 @@ public sealed class BundleService : IBundleService
         await File.WriteAllTextAsync(checksumPath, string.Join('\n', checksumLines) + "\n", ct);
 
         Directory.CreateDirectory(Path.GetDirectoryName(options.OutputBundlePath)!);
-        await CreateTarGzAsync(options.ScratchDirectory, options.OutputBundlePath, options.Compression, ct);
+        await CreateTarGzAsync(options.ScratchDirectory, options.OutputBundlePath, options.Compression, options.SourceDateEpoch, ct);
+        if (options.SourceDateEpoch is { } epoch)
+        {
+            ZeroGzipHeaderMtime(options.OutputBundlePath, epoch);
+        }
 
         var bundleHash = await Sha256Hasher.HashFileAsync(options.OutputBundlePath, ct);
 
@@ -446,11 +450,66 @@ public sealed class BundleService : IBundleService
         entries.AddRange(hashed);
     }
 
-    private static async Task CreateTarGzAsync(string sourceDir, string outputPath, CompressionLevel compression, CancellationToken ct)
+    private static async Task CreateTarGzAsync(
+        string sourceDir,
+        string outputPath,
+        CompressionLevel compression,
+        DateTimeOffset? sourceDateEpoch,
+        CancellationToken ct)
     {
         await using var fileStream = File.Create(outputPath);
         await using var gzip = new GZipStream(fileStream, compression);
-        await TarFile.CreateFromDirectoryAsync(sourceDir, gzip, includeBaseDirectory: false, ct);
+        if (sourceDateEpoch is null)
+        {
+            await TarFile.CreateFromDirectoryAsync(sourceDir, gzip, includeBaseDirectory: false, ct);
+            return;
+        }
+
+        var epoch = sourceDateEpoch.Value;
+        await using var writer = new TarWriter(gzip, TarEntryFormat.Pax, leaveOpen: false);
+
+        var rootFull = Path.GetFullPath(sourceDir);
+        var entries = new List<(string Relative, string FullPath, bool IsDirectory)>();
+        foreach (var dir in Directory.EnumerateDirectories(rootFull, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(rootFull, dir).Replace('\\', '/');
+            entries.Add((rel + "/", dir, true));
+        }
+        foreach (var file in Directory.EnumerateFiles(rootFull, "*", SearchOption.AllDirectories))
+        {
+            var rel = Path.GetRelativePath(rootFull, file).Replace('\\', '/');
+            entries.Add((rel, file, false));
+        }
+        entries.Sort((a, b) => string.CompareOrdinal(a.Relative, b.Relative));
+
+        foreach (var (relative, full, isDirectory) in entries)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (isDirectory)
+            {
+                var dirEntry = new PaxTarEntry(TarEntryType.Directory, relative)
+                {
+                    ModificationTime = epoch,
+                    Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                        | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                        | UnixFileMode.OtherRead | UnixFileMode.OtherExecute
+                };
+                await writer.WriteEntryAsync(dirEntry, ct);
+            }
+            else
+            {
+                var fileEntry = new PaxTarEntry(TarEntryType.RegularFile, relative)
+                {
+                    ModificationTime = epoch,
+                    Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                        | UnixFileMode.GroupRead
+                        | UnixFileMode.OtherRead
+                };
+                await using var src = File.OpenRead(full);
+                fileEntry.DataStream = src;
+                await writer.WriteEntryAsync(fileEntry, ct);
+            }
+        }
     }
 
     private static async Task ExtractTarGzAsync(string bundlePath, string targetDir, CancellationToken ct)
@@ -464,6 +523,25 @@ public sealed class BundleService : IBundleService
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         return version is null ? "0.1.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+    }
+
+    private static void ZeroGzipHeaderMtime(string path, DateTimeOffset epoch)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        if (fs.Length < 8)
+        {
+            return;
+        }
+        Span<byte> magic = stackalloc byte[2];
+        if (fs.Read(magic) != 2 || magic[0] != 0x1F || magic[1] != 0x8B)
+        {
+            return;
+        }
+        fs.Seek(4, SeekOrigin.Begin);
+        var seconds = (uint)Math.Max(0, epoch.ToUnixTimeSeconds());
+        Span<byte> mtime = stackalloc byte[4];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(mtime, seconds);
+        fs.Write(mtime);
     }
 
     private static void HardLinkOrCopy(string source, string target)

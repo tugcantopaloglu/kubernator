@@ -6,9 +6,12 @@ namespace Kubernator.Core.Packaging.Sbom;
 
 internal static class CycloneDxBuilder
 {
-    public static string Build(AppDescriptor app, string toolVersion)
+    public static string Build(AppDescriptor app, string toolVersion, DateTimeOffset? sourceDateEpoch = null)
     {
-        var serialNumber = $"urn:uuid:{Guid.NewGuid():D}";
+        var timestamp = sourceDateEpoch ?? DateTimeOffset.UtcNow;
+        var serialNumber = sourceDateEpoch is null
+            ? $"urn:uuid:{Guid.NewGuid():D}"
+            : $"urn:uuid:{DeterministicUuid("cyclonedx", app, toolVersion, timestamp):D}";
         var components = app.Dependencies.Managed
             .Select(m => new
             {
@@ -35,7 +38,7 @@ internal static class CycloneDxBuilder
             version = 1,
             metadata = new
             {
-                timestamp = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                timestamp = timestamp.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 tools = new[]
                 {
                     new { vendor = "kubernator", name = "kubernator", version = toolVersion }
@@ -51,6 +54,13 @@ internal static class CycloneDxBuilder
         };
 
         return JsonSerializer.Serialize(doc, JsonOptions);
+    }
+
+    private static Guid DeterministicUuid(string scope, AppDescriptor app, string toolVersion, DateTimeOffset epoch)
+    {
+        var key = $"{scope}|{toolVersion}|{epoch.ToUnixTimeSeconds()}|{app.EntryPoint?.AssemblyName ?? "app"}|{app.Runtime.Version ?? "0"}";
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key));
+        return new Guid(hash.AsSpan(0, 16));
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()

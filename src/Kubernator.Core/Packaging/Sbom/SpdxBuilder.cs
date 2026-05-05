@@ -6,9 +6,13 @@ namespace Kubernator.Core.Packaging.Sbom;
 
 internal static class SpdxBuilder
 {
-    public static string Build(AppDescriptor app, string toolVersion)
+    public static string Build(AppDescriptor app, string toolVersion, DateTimeOffset? sourceDateEpoch = null)
     {
-        var docNamespace = $"https://kubernator.dev/spdx/{Guid.NewGuid():D}";
+        var timestamp = sourceDateEpoch ?? DateTimeOffset.UtcNow;
+        var nsId = sourceDateEpoch is null
+            ? Guid.NewGuid()
+            : DeterministicUuid("spdx", app, toolVersion, timestamp);
+        var docNamespace = $"https://kubernator.dev/spdx/{nsId:D}";
         var rootPackage = SafeId(app.EntryPoint?.AssemblyName ?? "app");
 
         var packages = new List<object>
@@ -98,7 +102,7 @@ internal static class SpdxBuilder
             documentNamespace = docNamespace,
             creationInfo = new
             {
-                created = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                created = timestamp.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
                 creators = new[] { $"Tool: kubernator-{toolVersion}" }
             },
             packages,
@@ -106,6 +110,13 @@ internal static class SpdxBuilder
         };
 
         return JsonSerializer.Serialize(doc, JsonOptions);
+    }
+
+    private static Guid DeterministicUuid(string scope, AppDescriptor app, string toolVersion, DateTimeOffset epoch)
+    {
+        var key = $"{scope}|{toolVersion}|{epoch.ToUnixTimeSeconds()}|{app.EntryPoint?.AssemblyName ?? "app"}|{app.Runtime.Version ?? "0"}";
+        var hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key));
+        return new Guid(hash.AsSpan(0, 16));
     }
 
     private static string SafeId(string raw)
