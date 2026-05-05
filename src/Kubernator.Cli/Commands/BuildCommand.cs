@@ -112,7 +112,7 @@ internal sealed class BuildCommand : AsyncCommand<BuildCommand.Settings>
         }
         Directory.CreateDirectory(stagingDir);
 
-        await CopyDirectoryAsync(contextDir, stagingDir);
+        await CopyDirectoryAsync(contextDir, stagingDir, excludeRoot: output);
         File.Copy(dockerfilePath, System.IO.Path.Combine(stagingDir, "Dockerfile"), overwrite: true);
         var dockerignoreSrc = System.IO.Path.Combine(output, ".dockerignore");
         if (File.Exists(dockerignoreSrc))
@@ -154,21 +154,44 @@ internal sealed class BuildCommand : AsyncCommand<BuildCommand.Settings>
         return 0;
     }
 
-    private static async Task CopyDirectoryAsync(string source, string destination)
+    private static async Task CopyDirectoryAsync(string source, string destination, string? excludeRoot = null)
     {
         await Task.Run(() =>
         {
+            var excludeFull = excludeRoot is null ? null : System.IO.Path.GetFullPath(excludeRoot);
+            var sourceFull = System.IO.Path.GetFullPath(source);
+
             foreach (var dir in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
             {
+                if (IsUnderneath(System.IO.Path.GetFullPath(dir), excludeFull))
+                {
+                    continue;
+                }
                 var target = dir.Replace(source, destination, StringComparison.Ordinal);
                 Directory.CreateDirectory(target);
             }
             foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
             {
+                if (IsUnderneath(System.IO.Path.GetFullPath(file), excludeFull))
+                {
+                    continue;
+                }
                 var target = file.Replace(source, destination, StringComparison.Ordinal);
                 Directory.CreateDirectory(System.IO.Path.GetDirectoryName(target)!);
                 File.Copy(file, target, overwrite: true);
             }
         });
+    }
+
+    private static bool IsUnderneath(string candidate, string? root)
+    {
+        if (root is null)
+        {
+            return false;
+        }
+        var normalized = root.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar);
+        return candidate.StartsWith(normalized + System.IO.Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || candidate.StartsWith(normalized + System.IO.Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(candidate, normalized, StringComparison.OrdinalIgnoreCase);
     }
 }
