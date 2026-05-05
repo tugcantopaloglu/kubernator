@@ -9,6 +9,7 @@ public sealed record BuildContext
     public IReadOnlyDictionary<string, string> BuildArgs { get; init; } =
         new Dictionary<string, string>(StringComparer.Ordinal);
     public IReadOnlyList<string> AdditionalTags { get; init; } = [];
+    public IReadOnlyList<string> Platforms { get; init; } = [];
 }
 
 public sealed record ImageInfo
@@ -39,9 +40,17 @@ public interface IContainerEngine
     Task<ImageInfo?> GetImageAsync(string reference, CancellationToken ct = default);
 
     Task SaveImageAsync(string reference, string outputTarPath, CancellationToken ct = default);
+
+    Task SaveImageAsync(string reference, string platform, string outputTarPath, CancellationToken ct = default)
+        => SaveImageAsync(reference, outputTarPath, ct);
+
+    bool SupportsMultiPlatform => false;
 }
 
 public interface IContainerEngineProvider
 {
     Task<IContainerEngine> ResolveAsync(CancellationToken ct = default);
+
+    Task<IContainerEngine> ResolveAsync(bool requireMultiPlatform, CancellationToken ct = default)
+        => ResolveAsync(ct);
 }

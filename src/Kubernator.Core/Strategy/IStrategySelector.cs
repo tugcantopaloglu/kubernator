@@ -8,6 +8,7 @@ public sealed record StrategyOptions
     public string? ImageTag { get; init; }
     public string? WorkingDirectory { get; init; }
     public ExposureOptions? Exposure { get; init; }
+    public IReadOnlyList<string>? Platforms { get; init; }
 }
 
 public interface IStrategySelector

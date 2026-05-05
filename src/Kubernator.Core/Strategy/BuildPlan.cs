@@ -24,6 +24,7 @@ public sealed record BuildPlan
     public required HealthProbe? Health { get; init; }
     public required SecurityHardening Security { get; init; }
     public ExposureOptions? Exposure { get; init; }
+    public IReadOnlyList<string> Platforms { get; init; } = [];
     public IReadOnlyList<string> Notes { get; init; } = [];
 
     public string FullImageReference => $"{ImageName}:{ImageTag}";

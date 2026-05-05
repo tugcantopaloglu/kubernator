@@ -48,8 +48,40 @@ public sealed class StrategySelector : IStrategySelector
                 RunAsGroup = baseImage.DefaultGroupId
             },
             Exposure = options?.Exposure,
+            Platforms = NormalizePlatforms(options?.Platforms, app),
             Notes = baseImage.Notes is null ? [] : [baseImage.Notes]
         };
+    }
+
+    private static IReadOnlyList<string> NormalizePlatforms(IReadOnlyList<string>? requested, AppDescriptor app)
+    {
+        if (requested is { Count: > 0 })
+        {
+            return requested.Select(NormalizePlatform).Distinct(StringComparer.Ordinal).ToArray();
+        }
+        var os = app.Runtime.TargetOs switch
+        {
+            TargetOs.Linux or TargetOs.Any => "linux",
+            TargetOs.LinuxMusl => "linux",
+            TargetOs.Windows => "windows",
+            TargetOs.Osx => "darwin",
+            _ => "linux"
+        };
+        var arch = app.Runtime.TargetArch switch
+        {
+            TargetArchitecture.X64 => "amd64",
+            TargetArchitecture.Arm64 => "arm64",
+            TargetArchitecture.X86 => "386",
+            TargetArchitecture.Arm => "arm",
+            _ => "amd64"
+        };
+        return [$"{os}/{arch}"];
+    }
+
+    private static string NormalizePlatform(string raw)
+    {
+        var trimmed = raw.Trim().ToLowerInvariant();
+        return trimmed.Contains('/', StringComparison.Ordinal) ? trimmed : $"linux/{trimmed}";
     }
 
     private static (string Command, IReadOnlyList<string> Arguments) ResolveEntrypoint(AppDescriptor app, string workdir)

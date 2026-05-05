@@ -31,6 +31,7 @@ public sealed record ImageEntry
     public required long SizeBytes { get; init; }
     public required string Sha256 { get; init; }
     public string? ImageId { get; init; }
+    public string? Platform { get; init; }
 }
 
 public sealed record FileEntry
