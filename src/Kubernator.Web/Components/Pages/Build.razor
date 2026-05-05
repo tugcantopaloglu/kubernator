@@ -1,0 +1,210 @@
+@page "/build"
+@rendermode InteractiveServer
+@inject BuildPipeline Pipeline
+@inject IContainerEngineProvider EngineProvider
+
+<PageTitle>build · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>build</h1>
+    <p class="subtitle">generate Dockerfile + manifests and build the container image via Docker / Podman.</p>
+</div>
+
+@if (engineStatus is not null)
+{
+    <div class="banner @(engineOk ? "info" : "err")">
+        <svg class="ico" width="16" height="16"><use href="#@(engineOk ? "i-info" : "i-x")" /></svg>
+        <div class="banner-body"><span class="label">engine</span>@engineStatus</div>
+    </div>
+}
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="bd-path">path<span class="opt">  publish dir, absolute</span></label>
+            <InputText id="bd-path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+            <span class="hint">on the server. no file picker — this is a local tool.</span>
+        </div>
+        <div class="form-row span-2">
+            <label for="bd-out">output directory<span class="opt">  optional</span></label>
+            <InputText id="bd-out" @bind-Value="form.OutputDirectory" placeholder="(default: <path>/.kubernator)" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>image</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row span-2">
+            <label for="bd-name">name</label>
+            <InputText id="bd-name" @bind-Value="form.ImageName" placeholder="(auto from app name)" />
+        </div>
+        <div class="form-row">
+            <label for="bd-tag">tag</label>
+            <InputText id="bd-tag" @bind-Value="form.ImageTag" placeholder="(auto)" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.NoBuild" /> generate only (skip container build)</label>
+    </div>
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-package" /></svg> }
+            <span>@(busy ? "building…" : (form.NoBuild ? "generate" : "build"))</span>
+        </button>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator build &lt;path&gt;</code></span>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
+
+@if (log.Count > 0)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill ok"><span class="dot"></span>done</span>
+            }
+            else if (error is not null)
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
+}
+
+@if (result is not null)
+{
+    <div class="section">
+        <div class="section-head"><h2>result</h2></div>
+        <div class="card-grid">
+            <div class="fact-card">
+                <div class="fact-label">output</div>
+                <div class="fact-value"><code>@result.OutputDirectory</code></div>
+                <div class="muted" style="font-size:var(--fs-11)">@result.GeneratedFileCount file(s) written</div>
+            </div>
+            @if (result.ImageReference is not null)
+            {
+                <div class="fact-card">
+                    <div class="fact-label">image</div>
+                    <div class="fact-value"><code>@result.ImageReference</code></div>
+                    @if (result.ImageSizeBytes is long size)
+                    {
+                        <div class="muted" style="font-size:var(--fs-11)">@FormatSize(size)</div>
+                    }
+                </div>
+            }
+            @if (result.EngineName is not null)
+            {
+                <div class="fact-card">
+                    <div class="fact-label">engine</div>
+                    <div class="fact-value"><code>@result.EngineName @result.EngineVersion</code></div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string? ImageName { get; set; }
+        public string? ImageTag { get; set; }
+        public bool NoBuild { get; set; }
+    }
+
+    private readonly Form form = new();
+    private BuildPipelineResult? result;
+    private string? error;
+    private string? engineStatus;
+    private bool engineOk;
+    private bool busy;
+    private readonly List<string> log = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var engine = await EngineProvider.ResolveAsync();
+            var info = await engine.GetInfoAsync();
+            engineStatus = $"{info.Name} {info.Version} ({info.OperatingSystem}/{info.Architecture})";
+            engineOk = true;
+        }
+        catch (Exception ex)
+        {
+            engineStatus = $"unavailable — {ex.Message}";
+            engineOk = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        result = null;
+        busy = true;
+        log.Clear();
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            result = await Pipeline.RunAsync(new BuildPipelineRequest
+            {
+                Path = form.Path,
+                OutputDirectory = string.IsNullOrWhiteSpace(form.OutputDirectory) ? null : form.OutputDirectory,
+                ImageName = form.ImageName,
+                ImageTag = form.ImageTag,
+                NoBuild = form.NoBuild
+            }, progress);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+        if (bytes >= 1024L * 1024) return $"{bytes / 1024.0 / 1024:F2} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F2} KB";
+        return $"{bytes} B";
+    }
+}

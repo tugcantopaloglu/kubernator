@@ -1,0 +1,239 @@
+@page "/manifests"
+@rendermode InteractiveServer
+@inject ManifestAuditor Auditor
+
+<PageTitle>manifests · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">render</span>manifests</h1>
+    <p class="subtitle">browse, edit, and audit the Kubernetes YAML kubernator generated for an app.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>directory</h2></div>
+    <EditForm Model="@form" OnValidSubmit="@LoadDirectory" class="form">
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="m-dir">manifests directory</label>
+                <InputText id="m-dir" @bind-Value="form.Directory" placeholder="C:/path/to/publish/.kubernator/kubernetes" />
+                <span class="hint">usually <code>&lt;publish&gt;/.kubernator/kubernetes</code> after running build / generate.</span>
+            </div>
+            <div class="form-row">
+                <label for="m-ns">expected namespace<span class="opt">  optional</span></label>
+                <InputText id="m-ns" @bind-Value="form.ExpectedNamespace" placeholder="default" />
+            </div>
+        </div>
+        <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit">
+                <svg class="ico" width="14" height="14"><use href="#i-folder" /></svg>
+                <span>load</span>
+            </button>
+            @if (files.Count > 0)
+            {
+                <button class="btn btn-ghost" type="button" @onclick="RunAudit">
+                    <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg>
+                    <span>audit only</span>
+                </button>
+            }
+        </div>
+        @if (loadError is not null)
+        {
+            <div class="banner err">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body">@loadError</div>
+            </div>
+        }
+    </EditForm>
+</div>
+
+@if (files.Count > 0)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>files</h2>
+            <span class="meta">@files.Count file(s)</span>
+        </div>
+        <ul class="file-list">
+            @foreach (var f in files)
+            {
+                <li class="@(string.Equals(f, currentFile, StringComparison.Ordinal) ? "active" : "")">
+                    <svg class="ico" width="14" height="14"><use href="#i-file" /></svg>
+                    <a class="path" href="javascript:void(0)" @onclick="() => OpenFile(f)"><code>@Path.GetFileName(f)</code></a>
+                    <span class="size">@FormatSize(new FileInfo(f).Length)</span>
+                </li>
+            }
+        </ul>
+    </div>
+
+    @if (audit is not null)
+    {
+        <div class="section">
+            <div class="section-head">
+                <h2>audit</h2>
+                @if (audit.Pass)
+                {
+                    <span class="pill ok"><span class="dot"></span>secure baseline OK</span>
+                }
+                else
+                {
+                    <span class="pill fail"><span class="dot"></span>baseline broken</span>
+                }
+                <span class="meta">@audit.Findings.Count finding(s)</span>
+            </div>
+            @if (audit.Findings.Count == 0)
+            {
+                <p class="muted">all checks passed.</p>
+            }
+            else
+            {
+                <ul class="file-list">
+                    @foreach (var f in audit.Findings.OrderByDescending(x => (int)x.Severity))
+                    {
+                        <li>
+                            <svg class="ico" width="14" height="14"><use href="#@SeverityIcon(f.Severity)" /></svg>
+                            <span class="path"><code>@f.Code</code> @f.Message</span>
+                            <span class="size">@f.Severity.ToString().ToLowerInvariant()</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+}
+
+@if (currentFile is not null)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>edit</h2>
+            <span class="meta"><code>@currentFile</code></span>
+        </div>
+        <textarea class="log" rows="22" style="width:100%; resize:vertical" @bind="currentContent" spellcheck="false"></textarea>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="button" @onclick="SaveFile" disabled="@busy">
+                @if (busy) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-disk" /></svg> }
+                <span>@(busy ? "saving…" : "save + audit")</span>
+            </button>
+            <button class="btn btn-ghost" type="button" @onclick="ReloadCurrent" disabled="@busy">
+                <svg class="ico" width="14" height="14"><use href="#i-update" /></svg>
+                <span>discard changes</span>
+            </button>
+            @if (saveMessage is not null)
+            {
+                <span class="muted">@saveMessage</span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Directory { get; set; } = string.Empty;
+        public string? ExpectedNamespace { get; set; }
+    }
+
+    private readonly Form form = new();
+    private List<string> files = new();
+    private string? currentFile;
+    private string currentContent = string.Empty;
+    private string? loadError;
+    private string? saveMessage;
+    private bool busy;
+    private ManifestAuditResult? audit;
+
+    private void LoadDirectory()
+    {
+        loadError = null;
+        files.Clear();
+        currentFile = null;
+        audit = null;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(form.Directory))
+            {
+                loadError = "directory is required";
+                return;
+            }
+            var dir = Path.GetFullPath(form.Directory);
+            if (!Directory.Exists(dir))
+            {
+                loadError = $"not a directory: {dir}";
+                return;
+            }
+            files = Directory.EnumerateFiles(dir, "*.y*ml", SearchOption.TopDirectoryOnly)
+                .Where(p => p.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(p => p, StringComparer.Ordinal)
+                .ToList();
+            RunAudit();
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+    }
+
+    private void RunAudit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Directory)) return;
+        audit = Auditor.AuditDirectory(Path.GetFullPath(form.Directory),
+            string.IsNullOrWhiteSpace(form.ExpectedNamespace) ? null : form.ExpectedNamespace);
+    }
+
+    private void OpenFile(string path)
+    {
+        try
+        {
+            currentFile = path;
+            currentContent = File.ReadAllText(path);
+            saveMessage = null;
+        }
+        catch (Exception ex)
+        {
+            loadError = ex.Message;
+        }
+    }
+
+    private void ReloadCurrent()
+    {
+        if (currentFile is null) return;
+        OpenFile(currentFile);
+    }
+
+    private async Task SaveFile()
+    {
+        if (currentFile is null) return;
+        busy = true;
+        saveMessage = null;
+        try
+        {
+            await File.WriteAllTextAsync(currentFile, currentContent);
+            saveMessage = $"saved at {DateTimeOffset.UtcNow:HH:mm:ss} UTC";
+            RunAudit();
+        }
+        catch (Exception ex)
+        {
+            saveMessage = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string SeverityIcon(AuditSeverity s) => s switch
+    {
+        AuditSeverity.Critical => "i-x",
+        AuditSeverity.Warning => "i-warn",
+        _ => "i-info"
+    };
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+        if (bytes >= 1024L * 1024) return $"{bytes / 1024.0 / 1024:F2} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F2} KB";
+        return $"{bytes} B";
+    }
+}

@@ -1,0 +1,64 @@
+@page "/auth/login"
+@layout EmptyLayout
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>sign in · kubernator</PageTitle>
+
+@if (notConfigured)
+{
+    <p class="muted">redirecting to first-run setup…</p>
+}
+else
+{
+    <div class="auth-page">
+        <div class="auth-card">
+            <h1>sign in</h1>
+            <p class="muted">kubernator requires a username, password, and a 6-digit TOTP code from your authenticator app.</p>
+            <form method="post" action="/api/auth/login">
+                <AntiforgeryToken />
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                <div class="form-row">
+                    <label for="username">username</label>
+                    <input id="username" name="username" autocomplete="username" required />
+                </div>
+                <div class="form-row">
+                    <label for="password">password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password" required />
+                </div>
+                <div class="form-row">
+                    <label for="code">authenticator code</label>
+                    <input id="code" name="code" inputmode="numeric" pattern="[0-9 -]*" autocomplete="one-time-code" required maxlength="9" />
+                </div>
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="banner err">
+                        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                        <div class="banner-body">@ErrorMessage</div>
+                    </div>
+                }
+                <button class="btn btn-primary" type="submit">
+                    <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg>
+                    <span>sign in</span>
+                </button>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] public string? ErrorMessage { get; set; }
+
+    private bool notConfigured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        notConfigured = !await Auth.IsConfiguredAsync();
+        if (notConfigured)
+        {
+            Nav.NavigateTo("/auth/setup", forceLoad: true);
+        }
+    }
+}

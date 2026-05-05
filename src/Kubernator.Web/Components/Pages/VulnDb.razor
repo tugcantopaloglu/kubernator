@@ -67,6 +67,64 @@
 </div>
 
 <div class="section">
+    <div class="section-head"><h2>auto update from OSV</h2></div>
+    <p class="subtitle" style="margin-top:0">downloads <code>all.zip</code> per ecosystem from <code>osv-vulnerabilities.storage.googleapis.com</code>. needs internet — skip on air-gapped machines and use bundle import instead.</p>
+    <EditForm Model="@updateForm" OnValidSubmit="@HandleUpdate" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row">
+                <label for="up-eco">ecosystem</label>
+                <InputSelect id="up-eco" @bind-Value="updateForm.Ecosystem">
+                    <option value="">(all)</option>
+                    <option value="NuGet">NuGet</option>
+                    <option value="npm">npm</option>
+                    <option value="PyPI">PyPI</option>
+                    <option value="Maven">Maven</option>
+                    <option value="Go">Go</option>
+                </InputSelect>
+            </div>
+        </div>
+        <div class="row" style="gap:8px">
+            <button class="btn btn-primary" type="submit" disabled="@busyUpdate">
+                @if (busyUpdate) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-update" /></svg> }
+                <span>@(busyUpdate ? "updating…" : (string.IsNullOrEmpty(updateForm.Ecosystem) ? "update all" : $"update {updateForm.Ecosystem}"))</span>
+            </button>
+            <span class="spacer"></span>
+            <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator vulndb update</code></span>
+        </div>
+        @if (updateLog.Count > 0)
+        {
+            <div class="section" style="margin-top:var(--s-3)">
+                <div class="section-head">
+                    <h2>progress</h2>
+                    @if (busyUpdate)
+                    {
+                        <span class="pill run"><span class="dot"></span>running</span>
+                    }
+                    else if (updateError)
+                    {
+                        <span class="pill fail"><span class="dot"></span>failed</span>
+                    }
+                    else
+                    {
+                        <span class="pill ok"><span class="dot"></span>done</span>
+                    }
+                    <span class="meta">@updateLog.Count line(s)</span>
+                </div>
+                <div class="log" aria-live="polite">@string.Join('\n', updateLog)</div>
+            </div>
+        }
+        @if (updateMessage is not null)
+        {
+            <div class="banner @(updateError ? "err" : "info")">
+                <svg class="ico" width="16" height="16"><use href="#@(updateError ? "i-x" : "i-check2")" /></svg>
+                <div class="banner-body">@updateMessage</div>
+            </div>
+        }
+    </EditForm>
+</div>
+
+<div class="section">
     <div class="section-head"><h2>import OSV zip</h2></div>
     <EditForm Model="@importForm" OnValidSubmit="@HandleImportZip" class="form">
         <div class="form-grid">
@@ -160,6 +218,10 @@
         public string Ecosystem { get; set; } = "NuGet";
         public string ZipPath { get; set; } = string.Empty;
     }
+    private sealed class UpdateForm
+    {
+        public string Ecosystem { get; set; } = string.Empty;
+    }
     private sealed class ExportForm
     {
         public string OutputPath { get; set; } = string.Empty;
@@ -173,6 +235,12 @@
     private readonly ImportForm importForm = new();
     private readonly ExportForm exportForm = new();
     private readonly BundleImportForm bundleImportForm = new();
+    private readonly UpdateForm updateForm = new();
+
+    private string? updateMessage;
+    private bool updateError;
+    private bool busyUpdate;
+    private readonly List<string> updateLog = new();
 
     private string? importMessage;
     private bool importError;
@@ -194,6 +262,47 @@
     private async Task RefreshManifest()
     {
         manifest = await Database.GetManifestAsync();
+    }
+
+    private async Task HandleUpdate()
+    {
+        busyUpdate = true;
+        updateError = false;
+        updateMessage = null;
+        updateLog.Clear();
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            updateLog.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            var ecosystems = string.IsNullOrEmpty(updateForm.Ecosystem)
+                ? new[] { Ecosystems.NuGet, Ecosystems.Npm, Ecosystems.PyPI, Ecosystems.Maven, Ecosystems.Go }
+                : new[] { Ecosystems.Normalize(updateForm.Ecosystem) };
+
+            var totalPackages = 0;
+            var totalVulns = 0;
+            foreach (var eco in ecosystems)
+            {
+                progress.Report($"downloading {eco} from OSV");
+                var r = await Database.DownloadOsvAsync(eco, progress);
+                progress.Report($"{eco}: {r.PackageCount} packages, {r.VulnerabilityCount} vulnerabilities");
+                totalPackages += r.PackageCount;
+                totalVulns += r.VulnerabilityCount;
+            }
+            updateMessage = $"updated {ecosystems.Length} ecosystem(s) — {totalVulns} vulnerabilities across {totalPackages} packages";
+            await RefreshManifest();
+        }
+        catch (Exception ex)
+        {
+            updateError = true;
+            updateMessage = ex.Message;
+        }
+        finally
+        {
+            busyUpdate = false;
+        }
     }
 
     private async Task HandleImportZip()

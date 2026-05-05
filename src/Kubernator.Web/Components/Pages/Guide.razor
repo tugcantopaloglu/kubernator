@@ -1,0 +1,161 @@
+@page "/guide"
+
+<PageTitle>guide · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">tool</span>guide</h1>
+    <p class="subtitle">end-to-end walk-through: from a published .NET / Node / Python / Java / Go output to a signed, deployed workload.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>0. prepare</h2></div>
+    <p>kubernator does not build your source. it works on a <em>published</em> output directory:</p>
+    <ul class="file-list">
+        <li><span class="path">.NET</span><code>dotnet publish -c Release -o ./publish</code></li>
+        <li><span class="path">Node</span><code>npm run build</code> + a <code>package.json</code> with <code>start</code></li>
+        <li><span class="path">Python</span> a directory containing <code>requirements.txt</code> / <code>pyproject.toml</code> + entrypoint</li>
+        <li><span class="path">Java</span> the <code>target/</code> or <code>build/libs/</code> with the runnable jar</li>
+        <li><span class="path">Go</span> a directory with the compiled binary (or one main package)</li>
+        <li><span class="path">Static</span> a directory with <code>index.html</code></li>
+    </ul>
+    <p class="muted">all kubernator paths refer to the file system <strong>on this server</strong> — there is no upload step.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>1. analyze</h2></div>
+    <p>open <a href="analyze">/analyze</a>, paste the path to your publish dir.</p>
+    <p>kubernator detects the runtime, framework, ports, ICU/tzdata needs, and warns about anything missing.
+    nothing is generated yet — this is a read-only audit.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>2. build</h2></div>
+    <p>at <a href="build">/build</a>:</p>
+    <ul>
+        <li>set <code>image name</code> + <code>tag</code> (or leave auto)</li>
+        <li>tick <code>generate only</code> if you want the Dockerfile and manifests but no container build</li>
+    </ul>
+    <p>the page calls Docker / Podman over the engine adapter, copies your publish dir into a staging context, and runs the build. base image is chosen from a small allow-list (chiseled / chainguard / distroless / k8s.io) — no random registries.</p>
+    <p>output lands at <code>&lt;path&gt;/.kubernator/</code>: <code>Dockerfile</code>, <code>.dockerignore</code>, <code>kubernetes/*.yaml</code>.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>3. bundle (air-gapped)</h2></div>
+    <p>at <a href="bundle">/bundle</a> kubernator packs the OCI image, manifests, an SBOM (when syft is available), and an <code>install.sh</code> into a single deterministic <code>.kubpack</code>. carry it on a USB stick into a sealed environment.</p>
+    <p>tls modes for the optional <code>Ingress</code>: <code>none</code>, <code>self-signed</code>, <code>cert-manager</code>, or <code>user</code> (BYO cert). pick on the bundle form.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>4. sign &amp; verify</h2></div>
+    <ol>
+        <li>generate a cosign-format ECDSA key pair on <a href="sign">/sign</a> (top section).</li>
+        <li>store both keys at <a href="vault">/vault</a> so you don't have to keep typing paths.</li>
+        <li>pick the vault entry from the dropdown when you sign or verify a bundle.</li>
+        <li>the verifier on <a href="verify">/verify</a> checks integrity (sha256 of every file) plus the cosign signature. tick <code>require signature</code> in production.</li>
+    </ol>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>5. vulnerability scan</h2></div>
+    <p>kubernator ships with a local OSV-derived database. on a connected machine:</p>
+    <ul>
+        <li><a href="vulndb">/vulndb</a> → <code>auto update</code> (pulls all.zip per ecosystem from the OSV bucket — needs internet).</li>
+        <li><a href="vulndb">/vulndb</a> → <code>export bundle</code>; carry the <code>vulndb.tar.gz</code> across the airgap; <code>import bundle</code> on the target.</li>
+    </ul>
+    <p>then <a href="scan">/scan</a> against your publish dir. severity gating is built in.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>6. deploy</h2></div>
+    <p>at <a href="deploy">/deploy</a>:</p>
+    <ul>
+        <li>pick a kubectl context (any context in your kubeconfig — local, kind, or a remote cluster you've pre-configured)</li>
+        <li>tick <code>dry run</code> first — it sends to the API server with <code>--dry-run=server</code> so you see what would happen</li>
+        <li>uncheck dry-run and submit to apply</li>
+    </ul>
+    <p>contexts whose name contains <code>prod</code> / <code>production</code> / <code>live</code> trigger a confirmation gate.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>secure baseline · AUD codes</h2></div>
+    <p>before <a href="deploy">/deploy</a> applies anything, the manifest set is run through an audit. critical findings block the deploy unless you tick <code>allow insecure</code> on the form (last resort). you can run the same audit on demand at <a href="manifests">/manifests</a>. each finding shows its code; here is what each one means.</p>
+
+    <div class="section-head" style="margin-top:var(--s-3)"><h2>workload (Deployment) checks</h2></div>
+    <div class="table-wrap">
+        <table class="t">
+            <thead><tr><th style="width:90px">code</th><th style="width:90px">severity</th><th>what it checks · why it matters</th></tr></thead>
+            <tbody>
+                <tr><td><code>AUD100</code></td><td>critical</td><td>a <code>Deployment</code> must exist in the manifest set. nothing to deploy otherwise.</td></tr>
+                <tr><td><code>AUD101</code></td><td>critical</td><td>pod-level <code>securityContext.runAsNonRoot: true</code>. forces the pod to refuse to start if the image happens to default to root.</td></tr>
+                <tr><td><code>AUD102</code></td><td>critical</td><td>container-level <code>readOnlyRootFilesystem: true</code>. an attacker who lands code execution can't drop binaries onto disk.</td></tr>
+                <tr><td><code>AUD103</code></td><td>critical</td><td>container-level <code>allowPrivilegeEscalation: false</code>. blocks <code>setuid</code> escapes from non-root to root inside the container.</td></tr>
+                <tr><td><code>AUD104</code></td><td>critical</td><td>container drops <strong>ALL</strong> Linux capabilities. removes raw network/raw I/O / sys admin powers from the pod.</td></tr>
+                <tr><td><code>AUD105</code></td><td>critical</td><td>pod sets <code>automountServiceAccountToken: false</code>. without this, anything that runs in the pod has a credential to call the cluster API.</td></tr>
+                <tr><td><code>AUD106</code></td><td>critical</td><td>pod sets <code>seccompProfile: { type: RuntimeDefault }</code>. enforces a syscall whitelist at the kernel level.</td></tr>
+                <tr><td><code>AUD110</code></td><td>critical</td><td><code>hostNetwork: true</code> is not allowed. it would put the pod on the node's network namespace and bypass the NetworkPolicy entirely.</td></tr>
+                <tr><td><code>AUD111</code></td><td>critical</td><td><code>hostPID: true</code> is not allowed. it would let the pod see / signal every process on the node.</td></tr>
+                <tr><td><code>AUD112</code></td><td>critical</td><td><code>privileged: true</code> is not allowed. it disables almost every container isolation primitive.</td></tr>
+                <tr><td><code>AUD113</code></td><td>critical</td><td><code>runAsUser: 0</code> is not allowed. UID 0 inside the container maps to UID 0 on the node — that is full root if anything escapes.</td></tr>
+                <tr><td><code>AUD120</code></td><td>warning</td><td>container is missing CPU / memory <code>requests</code> and <code>limits</code>. without limits, this pod can starve neighbours on the node.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-head" style="margin-top:var(--s-3)"><h2>network isolation checks</h2></div>
+    <div class="table-wrap">
+        <table class="t">
+            <thead><tr><th style="width:90px">code</th><th style="width:90px">severity</th><th>what it checks · why it matters</th></tr></thead>
+            <tbody>
+                <tr><td><code>AUD200</code></td><td>critical</td><td>at least one <code>NetworkPolicy</code> must be present. without one, every pod in the cluster is reachable from / can reach this pod — that is how cross-app blast-radius happens.</td></tr>
+                <tr><td><code>AUD201</code></td><td>critical</td><td>the policy must list both <code>Ingress</code> and <code>Egress</code> in <code>policyTypes</code>. ingress-only policies still let the pod call any other service.</td></tr>
+                <tr><td><code>AUD202</code></td><td>warning</td><td>egress whitelist references <code>kubernetes.io/metadata.name: kube-system</code>. the generated default opens UDP/TCP 53 only to the in-cluster DNS, not "anywhere on port 53" — this check makes sure that scope did not get widened.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-head" style="margin-top:var(--s-3)"><h2>image &amp; namespace checks</h2></div>
+    <div class="table-wrap">
+        <table class="t">
+            <thead><tr><th style="width:90px">code</th><th style="width:90px">severity</th><th>what it checks · why it matters</th></tr></thead>
+            <tbody>
+                <tr><td><code>AUD300</code></td><td>warning</td><td>no <code>image:</code> reference was discovered. the manifest is probably incomplete.</td></tr>
+                <tr><td><code>AUD301</code></td><td>warning</td><td>image uses <code>:latest</code> or no tag at all. tags drift, digests don't — pin to <code>image@sha256:&lt;digest&gt;</code> for reproducible, air-gapped-friendly deploys.</td></tr>
+                <tr><td><code>AUD400</code></td><td>warning</td><td>no <code>namespace:</code> declared. the resource will land wherever the kubectl context defaults to — usually <code>default</code> — instead of where you asked.</td></tr>
+                <tr><td><code>AUD401</code></td><td>critical</td><td>manifest declares a namespace different from the deploy form's target. cross-namespace deploys are refused; you must either match the namespaces or change one of them on purpose.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section-head" style="margin-top:var(--s-3)"><h2>misc</h2></div>
+    <div class="table-wrap">
+        <table class="t">
+            <thead><tr><th style="width:90px">code</th><th style="width:90px">severity</th><th>what it checks · why it matters</th></tr></thead>
+            <tbody>
+                <tr><td><code>AUD000</code></td><td>critical</td><td>no manifests at all under the directory you pointed at. usually means you set the wrong path or never ran <a href="generate">/generate</a> / <a href="build">/build</a>.</td></tr>
+                <tr><td><code>AUD001</code></td><td>critical</td><td>a YAML file could not be read (permissions, locked file, etc).</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="banner info" style="margin-top:var(--s-3)">
+        <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+        <div class="banner-body">
+            <span class="label">summary</span>
+            kubernator's own generated manifests pass every critical check by default. AUD codes fire when something — a manual edit at <a href="manifests">/manifests</a>, a third-party manifest you pasted in, an external tool — has weakened the baseline. fix the manifest first; only fall back to <code>allow insecure</code> when you genuinely know what you're trading away.
+        </div>
+    </div>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>7. validate (optional)</h2></div>
+    <p><a href="validate">/validate</a> can spin up a disposable <a href="https://kind.sigs.k8s.io/" target="_blank" rel="noreferrer">kind</a> cluster, load your image into it, apply the manifests, and probe the endpoint. requires kind + kubectl on PATH.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>tips</h2></div>
+    <ul>
+        <li>store cosign keys, TLS certs, and CA bundles once at <a href="vault">/vault</a>; every page that needs them shows a dropdown.</li>
+        <li><a href="doctor">/doctor</a> probes your environment (engine, kubectl, kind, vulndb, state directory) and tells you what is missing before you start.</li>
+        <li>generated <code>Deployment</code> ships with <code>runAsNonRoot</code>, <code>readOnlyRootFilesystem</code>, <code>drop:[ALL]</code>, default-deny <code>NetworkPolicy</code>, PDB, HPA — drop them into a namespace labeled <code>pod-security.kubernetes.io/enforce=restricted</code> and they pass.</li>
+    </ul>
+</div>

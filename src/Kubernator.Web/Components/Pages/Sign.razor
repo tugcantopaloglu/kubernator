@@ -1,6 +1,7 @@
 @page "/sign"
 @rendermode InteractiveServer
 @inject ICosignSigner Signer
+@inject IKeyVault Vault
 
 <PageTitle>sign · kubernator</PageTitle>
 
@@ -68,7 +69,18 @@
                 <InputText id="s-blob" @bind-Value="signForm.BlobPath" placeholder="C:/path/to/file" />
             </div>
             <div class="form-row span-2">
-                <label for="s-key">private key</label>
+                <label for="s-vault-key">vault private key<span class="opt">  optional</span></label>
+                <InputSelect id="s-vault-key" @bind-Value="signForm.VaultKeyId">
+                    <option value="">(use path below)</option>
+                    @foreach (var v in vaultPrivateKeys)
+                    {
+                        <option value="@v.Id">@v.Name (@v.Id)@(v.Encrypted ? " · encrypted" : "")</option>
+                    }
+                </InputSelect>
+                <span class="hint">add keys at <a href="vault">/vault</a> to reuse them.</span>
+            </div>
+            <div class="form-row span-2">
+                <label for="s-key">private key path<span class="opt">  used if vault key not picked</span></label>
                 <InputText id="s-key" @bind-Value="signForm.PrivateKeyPath" placeholder="C:/keys/cosign.key" />
             </div>
             <div class="form-row">
@@ -125,6 +137,16 @@
                 <InputText id="v-sig" @bind-Value="verifyForm.SignaturePath" />
             </div>
             <div class="form-row span-2">
+                <label for="v-vault-pub">vault public key<span class="opt">  optional</span></label>
+                <InputSelect id="v-vault-pub" @bind-Value="verifyForm.VaultKeyId">
+                    <option value="">(use path below)</option>
+                    @foreach (var v in vaultPublicKeys)
+                    {
+                        <option value="@v.Id">@v.Name (@v.Id)</option>
+                    }
+                </InputSelect>
+            </div>
+            <div class="form-row span-2">
                 <label for="v-pub">public key path</label>
                 <InputText id="v-pub" @bind-Value="verifyForm.PublicKeyPath" />
             </div>
@@ -158,12 +180,14 @@
         public string BlobPath { get; set; } = string.Empty;
         public string PrivateKeyPath { get; set; } = string.Empty;
         public string? Passphrase { get; set; }
+        public string? VaultKeyId { get; set; }
     }
     private sealed class VerifyForm
     {
         public string BlobPath { get; set; } = string.Empty;
         public string SignaturePath { get; set; } = string.Empty;
         public string PublicKeyPath { get; set; } = string.Empty;
+        public string? VaultKeyId { get; set; }
     }
 
     private readonly KeyForm keyForm = new();
@@ -181,6 +205,16 @@
     private string? verifyMessage;
     private bool verifyOk;
     private bool busyVerify;
+
+    private List<VaultEntry> vaultPrivateKeys = new();
+    private List<VaultEntry> vaultPublicKeys = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await Vault.ListAsync();
+        vaultPrivateKeys = all.Where(e => e.Kind == VaultEntryKind.PrivateKey).ToList();
+        vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+    }
 
     private async Task HandleKeygen()
     {
@@ -212,9 +246,17 @@
 
     private async Task HandleSign()
     {
-        if (string.IsNullOrWhiteSpace(signForm.BlobPath) || string.IsNullOrWhiteSpace(signForm.PrivateKeyPath))
+        if (string.IsNullOrWhiteSpace(signForm.BlobPath))
         {
-            signError = "blob path and private key path are required";
+            signError = "blob path is required";
+            return;
+        }
+        var keyPath = !string.IsNullOrEmpty(signForm.VaultKeyId)
+            ? await Vault.ResolvePathAsync(signForm.VaultKeyId)
+            : signForm.PrivateKeyPath;
+        if (string.IsNullOrWhiteSpace(keyPath))
+        {
+            signError = "pick a vault key or set a private key path";
             return;
         }
         signError = null;
@@ -224,7 +266,7 @@
         {
             signResult = await Signer.SignBlobAsync(
                 System.IO.Path.GetFullPath(signForm.BlobPath),
-                System.IO.Path.GetFullPath(signForm.PrivateKeyPath),
+                System.IO.Path.GetFullPath(keyPath),
                 string.IsNullOrEmpty(signForm.Passphrase) ? null : signForm.Passphrase);
         }
         catch (Exception ex)
@@ -239,11 +281,14 @@
 
     private async Task HandleVerify()
     {
+        var pub = !string.IsNullOrEmpty(verifyForm.VaultKeyId)
+            ? await Vault.ResolvePathAsync(verifyForm.VaultKeyId)
+            : verifyForm.PublicKeyPath;
         if (string.IsNullOrWhiteSpace(verifyForm.BlobPath)
             || string.IsNullOrWhiteSpace(verifyForm.SignaturePath)
-            || string.IsNullOrWhiteSpace(verifyForm.PublicKeyPath))
+            || string.IsNullOrWhiteSpace(pub))
         {
-            verifyMessage = "all paths are required";
+            verifyMessage = "blob, signature, and a public key (vault or path) are required";
             verifyOk = false;
             return;
         }
@@ -254,7 +299,7 @@
             var r = await Signer.VerifyBlobAsync(
                 System.IO.Path.GetFullPath(verifyForm.BlobPath),
                 System.IO.Path.GetFullPath(verifyForm.SignaturePath),
-                System.IO.Path.GetFullPath(verifyForm.PublicKeyPath));
+                System.IO.Path.GetFullPath(pub));
             verifyOk = r.Valid;
             verifyMessage = r.Valid ? "signature is valid" : $"invalid: {r.Error}";
         }

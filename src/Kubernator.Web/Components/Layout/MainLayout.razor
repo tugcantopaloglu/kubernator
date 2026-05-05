@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
 @inject Microsoft.Extensions.Configuration.IConfiguration Config
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject IHttpContextAccessor HttpContextAccessor
 
 <IconSprite />
 
@@ -27,6 +29,21 @@
             <svg class="ico" width="14" height="14" data-theme-icon-sun style="display:none"><use href="#i-sun" /></svg>
             <span data-theme-label>dark</span>
         </button>
+        <span class="muted" style="font-size:var(--fs-12)">·</span>
+        <AuthorizeView>
+            <Authorized>
+                <span class="pill muted" title="signed-in user">
+                    <svg class="ico" width="12" height="12"><use href="#i-shield" /></svg>@context.User.Identity?.Name
+                </span>
+                <form method="post" action="/api/auth/logout" style="display:inline">
+                    <input type="hidden" name="__RequestVerificationToken" value="@AntiforgeryToken" />
+                    <button class="theme-toggle" type="submit" title="sign out">
+                        <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg>
+                        <span>sign out</span>
+                    </button>
+                </form>
+            </Authorized>
+        </AuthorizeView>
     </header>
 
     <NavMenu />
@@ -53,3 +70,16 @@
         @Body
     </main>
 </div>
+
+@code {
+    private string? AntiforgeryToken { get; set; }
+
+    protected override void OnInitialized()
+    {
+        var http = HttpContextAccessor.HttpContext;
+        if (http is not null)
+        {
+            AntiforgeryToken = Antiforgery.GetAndStoreTokens(http).RequestToken;
+        }
+    }
+}

@@ -1,8 +1,16 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using Kubernator.Core.DependencyInjection;
 using Kubernator.Runtime.DependencyInjection;
+using Kubernator.Web.Auth;
 using Kubernator.Web.Components;
 using Kubernator.Web.Downloads;
+using Kubernator.Web.Services;
+using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,6 +20,34 @@ builder.Services.AddRazorComponents()
 builder.Services.AddKubernatorCore();
 builder.Services.AddKubernatorRuntime();
 builder.Services.AddSingleton<ArtifactRegistry>();
+builder.Services.AddScoped<BuildPipeline>();
+builder.Services.AddSingleton<ManifestAuditor>();
+builder.Services.AddSingleton<AuthService>();
+
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
+    {
+        options.LoginPath = "/auth/login";
+        options.AccessDeniedPath = "/auth/login";
+        options.LogoutPath = "/api/auth/logout";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.Name = "kubernator.auth";
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.SlidingExpiration = true;
+    });
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddAntiforgery();
+builder.Services.AddHttpContextAccessor();
 
 var bindAddress = builder.Configuration["bind"] ?? "127.0.0.1:5050";
 var accessToken = builder.Configuration["token"];
@@ -52,8 +88,8 @@ var isLoopbackOnly = listenHost is "127.0.0.1" or "::1" or "localhost";
 if (!isLoopbackOnly && !requiresToken)
 {
     app.Logger.LogWarning(
-        "kubernator.web is bound to {Host} without --token; anyone reaching this port can drive the tool. " +
-        "Pass --token <hex> or bind to 127.0.0.1.", listenHost);
+        "kubernator.web is bound to {Host} without --token; sign-in is the only barrier. " +
+        "consider passing --token <hex> as an extra layer or bind to 127.0.0.1.", listenHost);
 }
 
 app.Use(async (ctx, next) =>
@@ -89,9 +125,11 @@ if (requiresToken)
 }
 
 app.UseStaticFiles();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapGet("/download/{token}", (string token, ArtifactRegistry registry) =>
+app.MapGet("/download/{token}", [Authorize] (string token, ArtifactRegistry registry) =>
 {
     var entry = registry.Resolve(token);
     if (entry is null || !File.Exists(entry.FilePath))
@@ -100,6 +138,76 @@ app.MapGet("/download/{token}", (string token, ArtifactRegistry registry) =>
     }
     var stream = File.OpenRead(entry.FilePath);
     return Results.File(stream, "application/octet-stream", entry.DownloadName);
+});
+
+app.MapPost("/api/auth/setup", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
+{
+    await antiforgery.ValidateRequestAsync(req.HttpContext);
+    if (await auth.IsConfiguredAsync())
+    {
+        return Results.Redirect("/auth/login?error=" + Uri.EscapeDataString("already configured"));
+    }
+    var form = await req.ReadFormAsync();
+    var username = form["username"].ToString();
+    var password = form["password"].ToString();
+    var confirm = form["confirm"].ToString();
+    if (!string.Equals(password, confirm, StringComparison.Ordinal))
+    {
+        return Results.Redirect("/auth/setup?error=" + Uri.EscapeDataString("passwords do not match"));
+    }
+    try
+    {
+        var result = await auth.SetupAsync(username, password);
+        return Results.Redirect(
+            "/auth/setup-complete?username=" + Uri.EscapeDataString(result.Account.Username)
+            + "&secret=" + Uri.EscapeDataString(result.Account.TotpSecret));
+    }
+    catch (Exception ex)
+    {
+        return Results.Redirect("/auth/setup?error=" + Uri.EscapeDataString(ex.Message));
+    }
+}).AllowAnonymous();
+
+app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
+{
+    await antiforgery.ValidateRequestAsync(req.HttpContext);
+    var form = await req.ReadFormAsync();
+    var username = form["username"].ToString();
+    var password = form["password"].ToString();
+    var code = form["code"].ToString();
+    var returnUrl = form["returnUrl"].ToString();
+    if (string.IsNullOrEmpty(returnUrl) || !Uri.TryCreate(returnUrl, UriKind.Relative, out _))
+    {
+        returnUrl = "/";
+    }
+
+    var ok = await auth.SignInAsync(username, password, code);
+    if (!ok)
+    {
+        var qs = "?error=" + Uri.EscapeDataString("invalid credentials or one-time code");
+        if (!string.IsNullOrEmpty(returnUrl) && returnUrl != "/")
+        {
+            qs += "&returnUrl=" + Uri.EscapeDataString(returnUrl);
+        }
+        return Results.Redirect("/auth/login" + qs);
+    }
+
+    var claims = new[]
+    {
+        new Claim(ClaimTypes.Name, username.Trim()),
+        new Claim("auth_method", "password+totp")
+    };
+    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    var principal = new ClaimsPrincipal(identity);
+    await req.HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+    return Results.Redirect(returnUrl);
+}).AllowAnonymous();
+
+app.MapPost("/api/auth/logout", async (HttpContext ctx, IAntiforgery antiforgery) =>
+{
+    await antiforgery.ValidateRequestAsync(ctx);
+    await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.Redirect("/auth/login");
 });
 
 app.MapRazorComponents<App>()

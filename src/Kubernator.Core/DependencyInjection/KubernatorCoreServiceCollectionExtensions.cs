@@ -25,6 +25,7 @@ using Kubernator.Core.Strategy;
 using Kubernator.Core.Tls.Rotation;
 using Kubernator.Core.Updates;
 using Kubernator.Core.Validation;
+using Kubernator.Core.Vault;
 using Kubernator.Core.Vulnerabilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -54,6 +55,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IStrategySelector, StrategySelector>();
         services.TryAddSingleton<IGenerationService, GenerationService>();
         services.TryAddSingleton<IBundleService, BundleService>();
+        services.TryAddSingleton<IKeyVault>(_ => FileKeyVault.Default());
         services.TryAddSingleton<ICosignSigner, CosignSigner>();
         services.TryAddSingleton<IPipelineService, PipelineService>();
         services.TryAddSingleton<IHelmService, HelmService>();

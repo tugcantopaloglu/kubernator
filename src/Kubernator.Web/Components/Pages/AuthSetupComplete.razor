@@ -1,0 +1,54 @@
+@page "/auth/setup-complete"
+@layout EmptyLayout
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+
+<PageTitle>account created · kubernator</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-card auth-card-wide">
+        <h1>save your TOTP secret</h1>
+        <p class="muted">add this secret to your authenticator app (Aegis, 1Password, Authy, Google Authenticator, etc.) <strong>before</strong> you sign in. you cannot recover it later — only reset by deleting <code>~/.kubernator/auth/account.json</code>.</p>
+
+        @if (string.IsNullOrEmpty(Secret))
+        {
+            <div class="banner err">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body">no secret in URL — go back to <a href="/auth/setup">/auth/setup</a>.</div>
+            </div>
+        }
+        else
+        {
+            <div class="card-grid">
+                <div class="fact-card">
+                    <div class="fact-label">account</div>
+                    <div class="fact-value"><code>@Username</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">TOTP secret (base32)</div>
+                    <div class="fact-value"><code style="word-break:break-all">@Secret</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">otpauth URI</div>
+                    <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@OtpAuthUri</code></div>
+                    <div class="muted" style="font-size:var(--fs-11)">paste this into a QR generator if your app needs a QR code.</div>
+                </div>
+            </div>
+
+            <div style="margin-top:var(--s-4)">
+                <a class="btn btn-primary" href="/auth/login">
+                    <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg>
+                    <span>continue to sign in</span>
+                </a>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] public string? Username { get; set; }
+    [SupplyParameterFromQuery] public string? Secret { get; set; }
+
+    private string? OtpAuthUri => string.IsNullOrEmpty(Secret) || string.IsNullOrEmpty(Username)
+        ? null
+        : Totp.BuildOtpAuthUri("kubernator", Username!, Secret!);
+}

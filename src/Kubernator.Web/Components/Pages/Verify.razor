@@ -1,0 +1,266 @@
+@page "/verify"
+@rendermode InteractiveServer
+@inject IBundleService Bundles
+@inject ICosignSigner Signer
+@inject IKeyVault Vault
+
+<PageTitle>verify · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">verify</span>verify bundle</h1>
+    <p class="subtitle">recompute hashes and (optionally) verify the cosign signature of a <code>.kubpack</code>.</p>
+</div>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+
+    <div class="section-head"><h2>bundle</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="vf-path">bundle path</label>
+            <InputText id="vf-path" @bind-Value="form.BundlePath" placeholder="C:/path/to/app.kubpack" />
+        </div>
+        <div class="form-row span-2">
+            <label for="vf-sig">signature path<span class="opt">  default: &lt;bundle&gt;.sig</span></label>
+            <InputText id="vf-sig" @bind-Value="form.SignaturePath" />
+        </div>
+        <div class="form-row span-2">
+            <label for="vf-vault-pub">vault public key<span class="opt">  optional</span></label>
+            <InputSelect id="vf-vault-pub" @bind-Value="form.VaultKeyId">
+                <option value="">(use path below)</option>
+                @foreach (var v in vaultPublicKeys)
+                {
+                    <option value="@v.Id">@v.Name (@v.Id)</option>
+                }
+            </InputSelect>
+        </div>
+        <div class="form-row span-2">
+            <label for="vf-pub">public key path<span class="opt">  default: &lt;bundle&gt;.pub or cosign.pub</span></label>
+            <InputText id="vf-pub" @bind-Value="form.PublicKeyPath" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.RequireSignature" /> require signature (fail if missing)</label>
+    </div>
+
+    <div class="row" style="gap:8px; margin-top:var(--s-3)">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy) { <span class="spinner"></span> }
+            else { <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg> }
+            <span>@(busy ? "verifying…" : "verify")</span>
+        </button>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator verify &lt;bundle&gt;</code></span>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
+
+@if (integrityChecked)
+{
+    <div class="section">
+        <div class="section-head"><h2>integrity</h2></div>
+        @if (result is not null && result.Manifest is not null)
+        {
+            <div class="card-grid">
+                <div class="fact-card">
+                    <div class="fact-label">tool</div>
+                    <div class="fact-value"><code>@result.Manifest.Tool @result.Manifest.ToolVersion</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">created</div>
+                    <div class="fact-value">@result.Manifest.CreatedAt.ToString("O")</div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">app</div>
+                    <div class="fact-value"><code>@result.Manifest.App.Name @result.Manifest.App.Version</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">contents</div>
+                    <div class="fact-value">@result.Manifest.Files.Count file(s) · @result.Manifest.Images.Count image(s)</div>
+                </div>
+            </div>
+        }
+        @if (result is not null && result.Ok)
+        {
+            <div class="banner info" style="margin-top:var(--s-3)">
+                <svg class="ico" width="16" height="16"><use href="#i-check2" /></svg>
+                <div class="banner-body"><span class="label">integrity</span>OK — every file matches its recorded sha256.</div>
+            </div>
+        }
+        else if (result is not null)
+        {
+            <div class="banner err" style="margin-top:var(--s-3)">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body">
+                    <span class="label">integrity</span>FAIL
+                    <ul style="margin:6px 0 0 0; padding-left:18px">
+                        @foreach (var e in result.Errors)
+                        {
+                            <li>@e</li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (signatureChecked)
+{
+    <div class="section">
+        <div class="section-head"><h2>signature</h2></div>
+        @if (signaturePresent)
+        {
+            <div class="card-grid">
+                <div class="fact-card">
+                    <div class="fact-label">signature</div>
+                    <div class="fact-value"><code>@resolvedSignaturePath</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">public key</div>
+                    <div class="fact-value"><code>@resolvedPublicKeyPath</code></div>
+                </div>
+            </div>
+            @if (signatureValid)
+            {
+                <div class="banner info" style="margin-top:var(--s-3)">
+                    <svg class="ico" width="16" height="16"><use href="#i-check2" /></svg>
+                    <div class="banner-body"><span class="label">signature</span>VALID — bundle is provably from the holder of the public key.</div>
+                </div>
+            }
+            else
+            {
+                <div class="banner err" style="margin-top:var(--s-3)">
+                    <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                    <div class="banner-body"><span class="label">signature</span>INVALID @(signatureMessage is null ? "" : $"— {signatureMessage}")</div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="banner @(form.RequireSignature ? "err" : "info")">
+                <svg class="ico" width="16" height="16"><use href="#@(form.RequireSignature ? "i-x" : "i-info")" /></svg>
+                <div class="banner-body">
+                    <span class="label">signature</span>not present
+                    @if (form.RequireSignature) { <text> — failing because <code>require signature</code> is on.</text> }
+                    else { <text> — skipped. tick <code>require signature</code> to enforce.</text> }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string BundlePath { get; set; } = string.Empty;
+        public string? SignaturePath { get; set; }
+        public string? PublicKeyPath { get; set; }
+        public string? VaultKeyId { get; set; }
+        public bool RequireSignature { get; set; }
+    }
+
+    private readonly Form form = new();
+    private List<VaultEntry> vaultPublicKeys = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await Vault.ListAsync();
+        vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+    }
+    private BundleVerificationResult? result;
+    private bool integrityChecked;
+    private bool signatureChecked;
+    private bool signaturePresent;
+    private bool signatureValid;
+    private string? signatureMessage;
+    private string? resolvedSignaturePath;
+    private string? resolvedPublicKeyPath;
+    private string? error;
+    private bool busy;
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.BundlePath))
+        {
+            error = "bundle path is required";
+            return;
+        }
+        error = null;
+        result = null;
+        integrityChecked = false;
+        signatureChecked = false;
+        signaturePresent = false;
+        signatureValid = false;
+        signatureMessage = null;
+        resolvedSignaturePath = null;
+        resolvedPublicKeyPath = null;
+        busy = true;
+
+        try
+        {
+            var bundlePath = Path.GetFullPath(form.BundlePath);
+            result = await Bundles.VerifyAsync(bundlePath);
+            integrityChecked = true;
+
+            if (!result.Ok)
+            {
+                return;
+            }
+
+            var sigPath = string.IsNullOrWhiteSpace(form.SignaturePath)
+                ? bundlePath + ".sig"
+                : Path.GetFullPath(form.SignaturePath);
+            string pubPath;
+            if (!string.IsNullOrEmpty(form.VaultKeyId))
+            {
+                pubPath = await Vault.ResolvePathAsync(form.VaultKeyId);
+            }
+            else
+            {
+                pubPath = string.IsNullOrWhiteSpace(form.PublicKeyPath)
+                    ? (File.Exists(bundlePath + ".pub")
+                        ? bundlePath + ".pub"
+                        : Path.Combine(Path.GetDirectoryName(bundlePath) ?? ".", "cosign.pub"))
+                    : Path.GetFullPath(form.PublicKeyPath);
+            }
+
+            resolvedSignaturePath = sigPath;
+            resolvedPublicKeyPath = pubPath;
+            signatureChecked = true;
+
+            if (!File.Exists(sigPath) || !File.Exists(pubPath))
+            {
+                signaturePresent = false;
+                if (form.RequireSignature)
+                {
+                    error = "signature required but missing";
+                }
+                return;
+            }
+
+            signaturePresent = true;
+            var sigResult = await Signer.VerifyBlobAsync(bundlePath, sigPath, pubPath);
+            signatureValid = sigResult.Valid;
+            signatureMessage = sigResult.Error;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

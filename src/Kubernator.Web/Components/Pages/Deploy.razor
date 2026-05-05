@@ -4,6 +4,7 @@
 @inject IStrategySelector Strategy
 @inject IGenerationService Generation
 @inject Kubernator.Core.Deployment.IClusterApplier Applier
+@inject ManifestAuditor Auditor
 
 <PageTitle>deploy · kubernator</PageTitle>
 
@@ -72,7 +73,30 @@
     <div class="row wrap" style="gap:16px">
         <label class="check"><InputCheckbox @bind-Value="form.DryRun" /> dry run (server-side)</label>
         <label class="check"><InputCheckbox @bind-Value="form.CreateNamespace" /> create namespace if missing</label>
+        <label class="check"><InputCheckbox @bind-Value="form.AllowInsecure" /> allow insecure (skip baseline checks)</label>
     </div>
+
+    @if (audit is not null)
+    {
+        <div class="banner @(audit.Pass ? "info" : "err")" style="margin-top:var(--s-3)">
+            <svg class="ico" width="16" height="16"><use href="#@(audit.Pass ? "i-check2" : "i-x")" /></svg>
+            <div class="banner-body">
+                <span class="label">baseline</span>
+                @if (audit.Pass) { <text>secure default — manifests pass restricted PSS, NetworkPolicy default-deny, namespace match.</text> }
+                else if (form.AllowInsecure) { <text>baseline broken but <code>allow insecure</code> is on — proceeding anyway. fix the manifests at <a href="manifests">/manifests</a> when possible.</text> }
+                else { <text>baseline broken — deploy is blocked. fix below or tick <code>allow insecure</code> to override (last resort).</text> }
+                @if (audit.Findings.Count > 0)
+                {
+                    <ul style="margin:6px 0 0 0; padding-left:18px">
+                        @foreach (var f in audit.Findings.OrderByDescending(x => (int)x.Severity).Take(8))
+                        {
+                            <li><code>@f.Code</code> · @f.Severity.ToString().ToLowerInvariant() · @f.Message</li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    }
 
     @if (LooksProduction)
     {
@@ -181,6 +205,7 @@
         public bool DryRun { get; set; }
         public bool CreateNamespace { get; set; } = true;
         public bool AllowProduction { get; set; }
+        public bool AllowInsecure { get; set; }
     }
 
     private readonly Form form = new();
@@ -190,13 +215,15 @@
     private bool busy;
     private Kubernator.Core.Deployment.DeployResult? result;
     private readonly List<string> log = new();
+    private ManifestAuditResult? audit;
 
     private bool LooksProduction => !string.IsNullOrEmpty(form.Context) && Kubernator.Core.Deployment.ClusterContext.LooksLikeProduction(form.Context);
 
     private bool CanDeploy =>
         !string.IsNullOrWhiteSpace(form.Context)
         && (!string.IsNullOrWhiteSpace(form.Path) || !string.IsNullOrWhiteSpace(form.ManifestsDirectory))
-        && (!LooksProduction || form.AllowProduction);
+        && (!LooksProduction || form.AllowProduction)
+        && (audit is null || audit.Pass || form.AllowInsecure);
 
     private string ButtonLabel
     {
@@ -272,6 +299,14 @@
                     Replicas = form.Replicas,
                     OverwriteExisting = true
                 });
+            }
+
+            audit = Auditor.AuditDirectory(manifestsDir, form.Namespace);
+            progress.Report($"baseline audit: {(audit.Pass ? "pass" : "fail")} ({audit.Findings.Count} finding(s))");
+            if (!audit.Pass && !form.AllowInsecure)
+            {
+                error = "manifest baseline failed — fix the manifests or tick 'allow insecure' to override";
+                return;
             }
 
             result = await Applier.ApplyAsync(new Kubernator.Core.Deployment.DeployOptions

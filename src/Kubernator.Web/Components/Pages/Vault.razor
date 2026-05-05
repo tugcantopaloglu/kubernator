@@ -1,0 +1,190 @@
+@page "/vault"
+@rendermode InteractiveServer
+@inject IKeyVault Store
+
+<PageTitle>vault · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">tool</span>key &amp; cert vault</h1>
+    <p class="subtitle">store cosign keys and TLS certificates once, reuse them in <code>sign</code>, <code>verify</code>, and <code>bundle</code>.</p>
+</div>
+
+<div class="banner info">
+    <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+    <div class="banner-body"><span class="label">root</span><code>@Store.RootDirectory</code></div>
+</div>
+
+<div class="section">
+    <div class="section-head">
+        <h2>entries</h2>
+        <span class="meta">@entries.Count item(s)</span>
+    </div>
+    @if (entries.Count == 0)
+    {
+        <p class="muted">vault is empty. add a private key, public key, or certificate below.</p>
+    }
+    else
+    {
+        <div class="table-wrap">
+            <table class="t">
+                <thead>
+                    <tr>
+                        <th style="width:120px">id</th>
+                        <th>name</th>
+                        <th style="width:140px">kind</th>
+                        <th style="width:90px">enc</th>
+                        <th style="width:240px">fingerprint</th>
+                        <th>created</th>
+                        <th style="width:80px"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in entries)
+                    {
+                        <tr>
+                            <td><code>@e.Id</code></td>
+                            <td>@e.Name</td>
+                            <td>
+                                @switch (e.Kind)
+                                {
+                                    case VaultEntryKind.PrivateKey: <span class="pill warn"><span class="dot"></span>private key</span> break;
+                                    case VaultEntryKind.PublicKey: <span class="pill ok"><span class="dot"></span>public key</span> break;
+                                    case VaultEntryKind.Certificate: <span class="pill"><span class="dot"></span>certificate</span> break;
+                                }
+                            </td>
+                            <td>@(e.Encrypted ? "yes" : "no")</td>
+                            <td><code style="font-size:var(--fs-11)">@e.Fingerprint</code></td>
+                            <td class="muted">@e.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <button class="btn btn-ghost btn-sm" type="button" @onclick="() => Remove(e.Id)">
+                                    <svg class="ico" width="12" height="12"><use href="#i-x" /></svg>
+                                    <span>remove</span>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>add entry</h2></div>
+    <EditForm Model="@form" OnValidSubmit="@HandleAdd" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row">
+                <label for="vt-kind">kind</label>
+                <InputSelect id="vt-kind" @bind-Value="form.Kind">
+                    <option value="@VaultEntryKind.PrivateKey">private key</option>
+                    <option value="@VaultEntryKind.PublicKey">public key</option>
+                    <option value="@VaultEntryKind.Certificate">certificate (PEM)</option>
+                </InputSelect>
+            </div>
+            <div class="form-row span-2">
+                <label for="vt-name">name</label>
+                <InputText id="vt-name" @bind-Value="form.Name" placeholder="prod-cosign / wildcard-shop-example-com" />
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="vt-source">source path on this server</label>
+                <InputText id="vt-source" @bind-Value="form.SourcePath" placeholder="C:/keys/cosign.key" />
+                <span class="hint">file is copied into the vault, not referenced — original can be deleted afterwards.</span>
+            </div>
+        </div>
+        @if (form.Kind == VaultEntryKind.PrivateKey)
+        {
+            <div class="row wrap" style="gap:16px">
+                <label class="check"><InputCheckbox @bind-Value="form.Encrypted" /> private key is passphrase-encrypted</label>
+            </div>
+        }
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@busy">
+                @if (busy) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-key" /></svg> }
+                <span>@(busy ? "adding…" : "add to vault")</span>
+            </button>
+        </div>
+        @if (message is not null)
+        {
+            <div class="banner @(error ? "err" : "info")">
+                <svg class="ico" width="16" height="16"><use href="#@(error ? "i-x" : "i-check2")" /></svg>
+                <div class="banner-body">@message</div>
+            </div>
+        }
+    </EditForm>
+</div>
+
+@code {
+    private sealed class Form
+    {
+        public VaultEntryKind Kind { get; set; } = VaultEntryKind.PrivateKey;
+        public string Name { get; set; } = string.Empty;
+        public string SourcePath { get; set; } = string.Empty;
+        public bool Encrypted { get; set; } = true;
+    }
+
+    private List<VaultEntry> entries = new();
+    private readonly Form form = new();
+    private string? message;
+    private bool error;
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await Refresh();
+
+    private async Task Refresh()
+    {
+        var list = await Store.ListAsync();
+        entries = list.ToList();
+    }
+
+    private async Task HandleAdd()
+    {
+        message = null;
+        error = false;
+        if (string.IsNullOrWhiteSpace(form.Name) || string.IsNullOrWhiteSpace(form.SourcePath))
+        {
+            error = true;
+            message = "name and source path are required";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var resolved = Path.GetFullPath(form.SourcePath);
+            if (!File.Exists(resolved))
+            {
+                throw new FileNotFoundException("source file not found", resolved);
+            }
+            var entry = await Store.ImportFromFileAsync(form.Name, form.Kind, resolved, form.Encrypted);
+            message = $"added {entry.Kind} '{entry.Name}' (id {entry.Id})";
+            form.Name = string.Empty;
+            form.SourcePath = string.Empty;
+            await Refresh();
+        }
+        catch (Exception ex)
+        {
+            error = true;
+            message = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private async Task Remove(string id)
+    {
+        try
+        {
+            await Store.RemoveAsync(id);
+            await Refresh();
+        }
+        catch (Exception ex)
+        {
+            error = true;
+            message = ex.Message;
+        }
+    }
+}

@@ -1,0 +1,62 @@
+@page "/auth/setup"
+@layout EmptyLayout
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>first run · kubernator</PageTitle>
+
+@if (alreadyConfigured)
+{
+    <p class="muted">already configured — redirecting…</p>
+}
+else
+{
+    <div class="auth-page">
+        <div class="auth-card">
+            <h1>first run setup</h1>
+            <p class="muted">create the single admin account that can drive this kubernator instance. you'll scan a TOTP secret into your authenticator app on the next step.</p>
+            <form method="post" action="/api/auth/setup">
+                <AntiforgeryToken />
+                <div class="form-row">
+                    <label for="username">username</label>
+                    <input id="username" name="username" required minlength="2" />
+                </div>
+                <div class="form-row">
+                    <label for="password">password<span class="opt">  min 8 chars</span></label>
+                    <input id="password" name="password" type="password" required minlength="8" />
+                </div>
+                <div class="form-row">
+                    <label for="confirm">confirm password</label>
+                    <input id="confirm" name="confirm" type="password" required minlength="8" />
+                </div>
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="banner err">
+                        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                        <div class="banner-body">@ErrorMessage</div>
+                    </div>
+                }
+                <button class="btn btn-primary" type="submit">
+                    <svg class="ico" width="14" height="14"><use href="#i-key" /></svg>
+                    <span>create account</span>
+                </button>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "error")] public string? ErrorMessage { get; set; }
+
+    private bool alreadyConfigured;
+
+    protected override async Task OnInitializedAsync()
+    {
+        alreadyConfigured = await Auth.IsConfiguredAsync();
+        if (alreadyConfigured)
+        {
+            Nav.NavigateTo("/auth/login", forceLoad: true);
+        }
+    }
+}
