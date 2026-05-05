@@ -116,6 +116,44 @@ public sealed class BundleServiceTests
     }
 
     [Fact]
+    public async Task Verify_fails_when_image_tar_is_tampered()
+    {
+        using var temp = TempPublishOutput.Create();
+        var plan = strategy.Plan(SampleApp.AspNet());
+        var engine = new FakeContainerEngine();
+        engine.Register(plan.FullImageReference);
+
+        var bundlePath = Path.Combine(temp.Path, "image-tampered.kubpack");
+        await service.CreateAsync(plan, new BundleOptions
+        {
+            OutputBundlePath = bundlePath,
+            ScratchDirectory = Path.Combine(temp.Path, "scratch")
+        }, engine);
+
+        var dir = Path.Combine(temp.Path, "image-tamperdir");
+        Directory.CreateDirectory(dir);
+        await using (var fs = File.OpenRead(bundlePath))
+        await using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+        {
+            await TarFile.ExtractToDirectoryAsync(gz, dir, overwriteFiles: true);
+        }
+        var imageTar = Directory.GetFiles(Path.Combine(dir, "images"), "*.tar").First();
+        await File.AppendAllBytesAsync(imageTar, [0xDE, 0xAD, 0xBE, 0xEF]);
+
+        var rebuilt = Path.Combine(temp.Path, "image-rebuilt.kubpack");
+        await using (var fs = File.Create(rebuilt))
+        await using (var gz = new GZipStream(fs, CompressionLevel.Optimal))
+        {
+            await TarFile.CreateFromDirectoryAsync(dir, gz, includeBaseDirectory: false);
+        }
+
+        var verify = await service.VerifyAsync(rebuilt);
+
+        verify.Ok.Should().BeFalse();
+        verify.Errors.Should().Contain(e => e.Contains("images/", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Builds_image_when_missing()
     {
         using var temp = TempPublishOutput.Create();

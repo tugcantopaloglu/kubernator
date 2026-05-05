@@ -73,6 +73,24 @@ public sealed class CosignSignerTests
     }
 
     [Fact]
+    public async Task Signature_is_der_encoded_ecdsa_p256_compatible_with_cosign()
+    {
+        using var t = TempPublishOutput.Create();
+        var blob = Path.Combine(t.Path, "blob.bin");
+        await File.WriteAllBytesAsync(blob, [1, 2, 3, 4, 5]);
+        var keys = await signer.GenerateKeyPairAsync(t.Path, "k", passphrase: null);
+        var sign = await signer.SignBlobAsync(blob, keys.PrivateKeyPath, passphrase: null);
+
+        var raw = Convert.FromBase64String(await File.ReadAllTextAsync(sign.SignaturePath));
+        raw[0].Should().Be(0x30, because: "DER SEQUENCE tag");
+        raw.Length.Should().BeInRange(70, 72, because: "DER ECDSA P-256 signatures are 70-72 bytes");
+
+        var publicPem = await File.ReadAllTextAsync(keys.PublicKeyPath);
+        publicPem.Should().StartWith("-----BEGIN PUBLIC KEY-----");
+        publicPem.TrimEnd().Should().EndWith("-----END PUBLIC KEY-----");
+    }
+
+    [Fact]
     public async Task Verify_fails_when_signed_by_a_different_key()
     {
         using var t = TempPublishOutput.Create();

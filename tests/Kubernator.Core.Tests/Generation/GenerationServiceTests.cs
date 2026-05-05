@@ -78,6 +78,23 @@ public sealed class GenerationServiceTests
     }
 
     [Fact]
+    public async Task NetworkPolicy_allows_dns_egress_to_kube_system()
+    {
+        using var temp = TempPublishOutput.Create();
+        var plan = strategy.Plan(SampleApp.AspNet());
+
+        await generation.GenerateAsync(plan, new GenerationOptions { OutputDirectory = temp.Path });
+
+        var policy = await File.ReadAllTextAsync(Path.Combine(temp.Path, "kubernetes", "networkpolicy.yaml"));
+        policy.Should().Contain("kubernetes.io/metadata.name: kube-system");
+        policy.Should().Contain("k8s-app: kube-dns");
+        policy.Should().Contain("protocol: UDP");
+        policy.Should().Contain("port: 53");
+        policy.Should().Contain("policyTypes:");
+        policy.Should().Contain("- Egress");
+    }
+
+    [Fact]
     public async Task SelfContained_uses_chainguard_static_and_uid_65532()
     {
         using var temp = TempPublishOutput.Create();
