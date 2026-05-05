@@ -178,6 +178,56 @@ public sealed class BundleServiceTests
     }
 
     [Fact]
+    public async Task Multi_arch_bundle_emits_one_image_tar_per_platform()
+    {
+        using var temp = TempPublishOutput.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "MyWebApp.dll"), string.Empty);
+        var app = SampleApp.AspNet() with { SourcePath = temp.Path };
+        var plan = strategy.Plan(app, new StrategyOptions
+        {
+            Platforms = ["linux/amd64", "linux/arm64"]
+        });
+        var engine = new FakeContainerEngine { SupportsMultiPlatform = true };
+
+        var bundlePath = Path.Combine(temp.Path, "multi.kubpack");
+        var result = await service.CreateAsync(plan, new BundleOptions
+        {
+            OutputBundlePath = bundlePath,
+            ScratchDirectory = Path.Combine(temp.Path, "scratch")
+        }, engine);
+
+        result.Manifest.Images.Should().HaveCount(2);
+        result.Manifest.Images.Select(i => i.Platform).Should().BeEquivalentTo(["linux/amd64", "linux/arm64"]);
+        engine.SavedPerPlatform.Select(p => p.Platform).Should().BeEquivalentTo(["linux/amd64", "linux/arm64"]);
+
+        var entries = await ListBundleEntriesAsync(bundlePath);
+        entries.Should().Contain(e => e.EndsWith("-amd64.tar", StringComparison.Ordinal));
+        entries.Should().Contain(e => e.EndsWith("-arm64.tar", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Multi_arch_request_against_single_platform_engine_throws()
+    {
+        using var temp = TempPublishOutput.Create();
+        File.WriteAllText(Path.Combine(temp.Path, "MyWebApp.dll"), string.Empty);
+        var app = SampleApp.AspNet() with { SourcePath = temp.Path };
+        var plan = strategy.Plan(app, new StrategyOptions
+        {
+            Platforms = ["linux/amd64", "linux/arm64"]
+        });
+        var engine = new FakeContainerEngine();
+
+        var act = () => service.CreateAsync(plan, new BundleOptions
+        {
+            OutputBundlePath = Path.Combine(temp.Path, "x.kubpack"),
+            ScratchDirectory = Path.Combine(temp.Path, "scratch")
+        }, engine);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not support*");
+    }
+
+    [Fact]
     public async Task Same_input_with_source_date_epoch_yields_identical_bundle_hash()
     {
         using var temp = TempPublishOutput.Create();

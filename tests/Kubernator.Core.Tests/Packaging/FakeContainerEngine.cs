@@ -9,8 +9,10 @@ internal sealed class FakeContainerEngine : IContainerEngine
     private bool simulateMissingThenBuild;
 
     public string Kind => "fake";
+    public bool SupportsMultiPlatform { get; set; }
 
     public List<string> SavedImages { get; } = [];
+    public List<(string Reference, string Platform)> SavedPerPlatform { get; } = [];
     public List<BuildContext> Builds { get; } = [];
 
     public void Register(string reference, long sizeBytes = 1024)
@@ -62,6 +64,14 @@ internal sealed class FakeContainerEngine : IContainerEngine
     {
         SavedImages.Add(reference);
         var bytes = System.Text.Encoding.UTF8.GetBytes($"fake-image-tar:{reference}");
+        await File.WriteAllBytesAsync(outputTarPath, bytes, ct);
+    }
+
+    public async Task SaveImageAsync(string reference, string platform, string outputTarPath, CancellationToken ct = default)
+    {
+        SavedImages.Add(reference);
+        SavedPerPlatform.Add((reference, platform));
+        var bytes = System.Text.Encoding.UTF8.GetBytes($"fake-image-tar:{reference}:{platform}");
         await File.WriteAllBytesAsync(outputTarPath, bytes, ct);
     }
 }
