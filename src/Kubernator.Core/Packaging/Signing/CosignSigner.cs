@@ -59,7 +59,7 @@ public sealed class CosignSigner : ICosignSigner
         LoadPrivateKey(ecdsa, await File.ReadAllTextAsync(privateKeyPath, ct), passphrase);
 
         await using var stream = File.OpenRead(blobPath);
-        var signature = ecdsa.SignData(stream, HashAlgorithmName.SHA256);
+        var signature = ecdsa.SignData(stream, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         var sigBase64 = Convert.ToBase64String(signature);
 
         var sigPath = blobPath + ".sig";
@@ -112,7 +112,7 @@ public sealed class CosignSigner : ICosignSigner
         }
 
         await using var stream = File.OpenRead(blobPath);
-        var ok = ecdsa.VerifyData(stream, signature, HashAlgorithmName.SHA256);
+        var ok = ecdsa.VerifyData(stream, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
         return ok
             ? new SignatureVerificationResult { Valid = true }
             : new SignatureVerificationResult { Valid = false, Error = "signature does not match public key for this blob" };
