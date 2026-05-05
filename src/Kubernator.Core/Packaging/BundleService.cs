@@ -181,6 +181,10 @@ public sealed class BundleService : IBundleService
 
         progress?.Report("computing bundle hash");
         var bundleHash = await Sha256Hasher.HashFileAsync(options.OutputBundlePath, ct);
+        await File.WriteAllTextAsync(
+            options.OutputBundlePath + ".sha256",
+            $"{bundleHash}  {Path.GetFileName(options.OutputBundlePath)}\n",
+            ct);
 
         if (!options.KeepScratch)
         {
@@ -212,12 +216,42 @@ public sealed class BundleService : IBundleService
             return new BundleVerificationResult { Ok = false, Errors = [$"bundle not found: {bundlePath}"], Manifest = null };
         }
 
+        var outerSidecar = bundlePath + ".sha256";
+        if (File.Exists(outerSidecar))
+        {
+            progress?.Report("verifying outer bundle hash");
+            var sidecarText = (await File.ReadAllTextAsync(outerSidecar, ct)).Trim();
+            var (expected, _) = Sha256Hasher.ParseChecksumLine(sidecarText);
+            var actual = await Sha256Hasher.HashFileAsync(bundlePath, ct);
+            if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            {
+                return new BundleVerificationResult
+                {
+                    Ok = false,
+                    Errors = [$"outer bundle hash mismatch (expected {expected}, got {actual})"],
+                    Manifest = null
+                };
+            }
+        }
+
         var temp = Path.Combine(Path.GetTempPath(), "kubernator-verify-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
         try
         {
             progress?.Report($"extracting {Path.GetFileName(bundlePath)}");
-            await ExtractTarGzAsync(bundlePath, temp, ct);
+            try
+            {
+                await ExtractTarGzAsync(bundlePath, temp, ct);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or FormatException)
+            {
+                return new BundleVerificationResult
+                {
+                    Ok = false,
+                    Errors = [$"bundle archive is corrupt: {ex.Message}"],
+                    Manifest = null
+                };
+            }
 
             var manifestPath = Path.Combine(temp, ManifestFileName);
             var checksumPath = Path.Combine(temp, ChecksumFileName);
@@ -572,8 +606,20 @@ public sealed class BundleService : IBundleService
     private static async Task ExtractTarGzAsync(string bundlePath, string targetDir, CancellationToken ct)
     {
         await using var fileStream = File.OpenRead(bundlePath);
-        await using var gzip = new GZipStream(fileStream, CompressionMode.Decompress);
-        await TarFile.ExtractToDirectoryAsync(gzip, targetDir, overwriteFiles: true, ct);
+        await using (var gzip = new GZipStream(fileStream, CompressionMode.Decompress, leaveOpen: true))
+        {
+            await TarFile.ExtractToDirectoryAsync(gzip, targetDir, overwriteFiles: true, ct);
+            await gzip.CopyToAsync(Stream.Null, ct);
+        }
+
+        var trailing = new byte[1];
+        var read = await fileStream.ReadAsync(trailing.AsMemory(), ct);
+        if (read > 0)
+        {
+            var remaining = fileStream.Length - fileStream.Position + read;
+            throw new InvalidDataException(
+                $"trailing data after gzip stream ({remaining} byte(s) at offset {fileStream.Position - read})");
+        }
     }
 
     private static string ToolVersion()
