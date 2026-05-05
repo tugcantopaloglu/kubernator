@@ -65,6 +65,10 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
         [Description("gzip level: optimal (default) | fastest | smallest | none.")]
         public string? Compression { get; init; }
 
+        [CommandOption("--source-date-epoch <value>")]
+        [Description("Reproducible build epoch (RFC3339 timestamp or Unix seconds). Stamps manifest, SBOM, tar mtimes, and gzip header.")]
+        public string? SourceDateEpoch { get; init; }
+
         [CommandOption("--hostname <host>")]
         public string? Hostname { get; init; }
 
@@ -211,6 +215,24 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             var v => throw new InvalidOperationException($"unknown compression level: {v}")
         };
 
+        DateTimeOffset? sourceDateEpoch = null;
+        if (!string.IsNullOrWhiteSpace(settings.SourceDateEpoch))
+        {
+            var raw = settings.SourceDateEpoch!.Trim();
+            if (long.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var unix))
+            {
+                sourceDateEpoch = DateTimeOffset.FromUnixTimeSeconds(unix);
+            }
+            else if (DateTimeOffset.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out var parsed))
+            {
+                sourceDateEpoch = parsed;
+            }
+            else
+            {
+                throw new InvalidOperationException($"--source-date-epoch must be RFC3339 or Unix seconds, got: {raw}");
+            }
+        }
+
         var options = new BundleOptions
         {
             OutputBundlePath = bundlePath,
@@ -220,7 +242,8 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             Replicas = settings.Replicas ?? 1,
             KeepScratch = settings.KeepScratch,
             Scaling = scaling,
-            Compression = compression
+            Compression = compression,
+            SourceDateEpoch = sourceDateEpoch
         };
 
         BundleResult result;
