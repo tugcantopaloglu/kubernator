@@ -27,5 +27,24 @@ internal sealed class IndentedTextWriter
 
     public void Blank() => buffer.Append('\n');
 
+    public void Raw(string block)
+    {
+        var lines = block.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        foreach (var line in lines)
+        {
+            if (line.Length == 0)
+            {
+                buffer.Append('\n');
+                continue;
+            }
+            for (int i = 0; i < indent; i++)
+            {
+                buffer.Append("  ");
+            }
+            buffer.Append(line);
+            buffer.Append('\n');
+        }
+    }
+
     public override string ToString() => buffer.ToString();
 }

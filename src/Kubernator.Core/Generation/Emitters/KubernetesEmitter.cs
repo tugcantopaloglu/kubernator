@@ -131,39 +131,23 @@ internal static class KubernetesEmitter
         w.Line("- Ingress");
         w.Line("- Egress");
         w.Outdent();
-        w.Line("egress:");
-        w.Indent();
-        w.Line("- to:");
-        w.Indent();
-        w.Line("- namespaceSelector:");
-        w.Indent();
-        w.Line("matchLabels:");
-        w.Indent();
-        w.Line("kubernetes.io/metadata.name: kube-system");
-        w.Outdent();
-        w.Outdent();
-        w.Line("podSelector:");
-        w.Indent();
-        w.Line("matchLabels:");
-        w.Indent();
-        w.Line("k8s-app: kube-dns");
-        w.Outdent();
-        w.Outdent();
-        w.Line("ports:");
-        w.Indent();
-        w.Line("- protocol: UDP");
-        w.Indent();
-        w.Line("port: 53");
-        w.Outdent();
-        w.Line("- protocol: TCP");
-        w.Indent();
-        w.Line("port: 53");
-        w.Outdent();
-        w.Outdent();
-        w.Outdent();
+        w.Raw("""
+              egress:
+                - to:
+                    - namespaceSelector:
+                        matchLabels:
+                          kubernetes.io/metadata.name: kube-system
+                      podSelector:
+                        matchLabels:
+                          k8s-app: kube-dns
+                  ports:
+                    - protocol: UDP
+                      port: 53
+                    - protocol: TCP
+                      port: 53
+              """);
         if (plan.ExposedPorts.Count > 0)
         {
-            w.Outdent();
             w.Line("ingress:");
             w.Indent();
             w.Line("- ports:");
@@ -176,11 +160,9 @@ internal static class KubernetesEmitter
                 w.Outdent();
             }
             w.Outdent();
-        }
-        else
-        {
             w.Outdent();
         }
+        w.Outdent();
         w.Outdent();
         return w.ToString();
     }
