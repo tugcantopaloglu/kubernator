@@ -252,7 +252,11 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             result = await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
                 .StartAsync("Building bundle (build, save image, sbom, scripts, archive)",
-                    async _ => await bundleService.CreateAsync(plan, options, engine));
+                    async ctx =>
+                    {
+                        var progress = new Progress<string>(msg => ctx.Status(msg));
+                        return await bundleService.CreateAsync(plan, options, engine, progress);
+                    });
         }
         catch (Exception ex)
         {

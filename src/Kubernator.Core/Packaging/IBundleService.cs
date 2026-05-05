@@ -9,7 +9,11 @@ public interface IBundleService
         BuildPlan plan,
         BundleOptions options,
         IContainerEngine engine,
+        IProgress<string>? progress = null,
         CancellationToken ct = default);
 
-    Task<BundleVerificationResult> VerifyAsync(string bundlePath, CancellationToken ct = default);
+    Task<BundleVerificationResult> VerifyAsync(
+        string bundlePath,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default);
 }

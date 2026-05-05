@@ -32,8 +32,10 @@ public sealed class BundleService : IBundleService
         BuildPlan plan,
         BundleOptions options,
         IContainerEngine engine,
+        IProgress<string>? progress = null,
         CancellationToken ct = default)
     {
+        progress?.Report($"preparing scratch at {options.ScratchDirectory}");
         if (Directory.Exists(options.ScratchDirectory))
         {
             Directory.Delete(options.ScratchDirectory, recursive: true);
@@ -52,7 +54,8 @@ public sealed class BundleService : IBundleService
             Directory.CreateDirectory(sbomDir);
         }
 
-        await EnsureImageBuiltAsync(plan, options, engine, ct);
+        progress?.Report($"resolving image {plan.FullImageReference}");
+        await EnsureImageBuiltAsync(plan, options, engine, progress, ct);
 
         var imageRef = plan.FullImageReference;
         var imageInfo = await engine.GetImageAsync(imageRef, ct)
@@ -60,8 +63,10 @@ public sealed class BundleService : IBundleService
 
         var imageTarName = $"{SanitizeFilename(plan.ImageName)}-{plan.ImageTag}.tar";
         var imageTarPath = Path.Combine(imagesDir, imageTarName);
+        progress?.Report($"saving image to {imageTarName}");
         await engine.SaveImageAsync(imageRef, imageTarPath, ct);
 
+        progress?.Report("hashing image tar");
         var imageHash = await Sha256Hasher.HashFileAsync(imageTarPath, ct);
         var imageEntry = new ImageEntry
         {
@@ -74,10 +79,12 @@ public sealed class BundleService : IBundleService
 
         var ns = options.KubernetesNamespace ?? "default";
         var k8sName = SanitizeKubernetesName(plan.ImageName);
+        progress?.Report("writing kubernetes manifests");
         var manifestFiles = WriteKubernetesManifests(plan, manifestsDir, k8sName, ns, options);
 
         if (options.IncludeSbom)
         {
+            progress?.Report("writing SBOM (CycloneDX + SPDX)");
             await File.WriteAllTextAsync(
                 Path.Combine(sbomDir, $"{k8sName}.cyclonedx.json"),
                 CycloneDxBuilder.Build(plan.App, ToolVersion(), options.SourceDateEpoch),
@@ -98,6 +105,7 @@ public sealed class BundleService : IBundleService
         await File.WriteAllTextAsync(topInstallSh, BundleScripts.InstallSh, ct);
         await File.WriteAllTextAsync(topInstallPs1, BundleScripts.InstallPs1, ct);
 
+        progress?.Report("hashing bundle files");
         var fileEntries = new List<FileEntry>();
         await CollectFileEntriesAsync(options.ScratchDirectory, fileEntries, ct);
 
@@ -141,12 +149,14 @@ public sealed class BundleService : IBundleService
         await File.WriteAllTextAsync(checksumPath, string.Join('\n', checksumLines) + "\n", ct);
 
         Directory.CreateDirectory(Path.GetDirectoryName(options.OutputBundlePath)!);
+        progress?.Report($"compressing bundle to {Path.GetFileName(options.OutputBundlePath)}");
         await CreateTarGzAsync(options.ScratchDirectory, options.OutputBundlePath, options.Compression, options.SourceDateEpoch, ct);
         if (options.SourceDateEpoch is { } epoch)
         {
             ZeroGzipHeaderMtime(options.OutputBundlePath, epoch);
         }
 
+        progress?.Report("computing bundle hash");
         var bundleHash = await Sha256Hasher.HashFileAsync(options.OutputBundlePath, ct);
 
         if (!options.KeepScratch)
@@ -169,7 +179,10 @@ public sealed class BundleService : IBundleService
         };
     }
 
-    public async Task<BundleVerificationResult> VerifyAsync(string bundlePath, CancellationToken ct = default)
+    public async Task<BundleVerificationResult> VerifyAsync(
+        string bundlePath,
+        IProgress<string>? progress = null,
+        CancellationToken ct = default)
     {
         if (!File.Exists(bundlePath))
         {
@@ -180,6 +193,7 @@ public sealed class BundleService : IBundleService
         Directory.CreateDirectory(temp);
         try
         {
+            progress?.Report($"extracting {Path.GetFileName(bundlePath)}");
             await ExtractTarGzAsync(bundlePath, temp, ct);
 
             var manifestPath = Path.Combine(temp, ManifestFileName);
@@ -206,6 +220,7 @@ public sealed class BundleService : IBundleService
                 };
             }
 
+            progress?.Report("verifying file hashes");
             var errors = new System.Collections.Concurrent.ConcurrentBag<string>();
             var lines = await File.ReadAllLinesAsync(checksumPath, ct);
             var work = lines
@@ -255,17 +270,20 @@ public sealed class BundleService : IBundleService
         BuildPlan plan,
         BundleOptions options,
         IContainerEngine engine,
+        IProgress<string>? progress,
         CancellationToken ct)
     {
         var existing = await engine.GetImageAsync(plan.FullImageReference, ct);
         if (existing is not null)
         {
+            progress?.Report("image already present in engine");
             return;
         }
         if (!options.BuildIfMissing)
         {
             throw new InvalidOperationException($"image {plan.FullImageReference} not present and BuildIfMissing is false");
         }
+        progress?.Report("building image (no cached layer hit)");
 
         var contextDir = Path.Combine(options.ScratchDirectory, "build-context");
         Directory.CreateDirectory(contextDir);
