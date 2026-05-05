@@ -1,0 +1,161 @@
+@page "/validate"
+@rendermode InteractiveServer
+@inject IAnalysisService Analysis
+@inject IStrategySelector Strategy
+@inject IGenerationService Generation
+@inject IContainerEngineProvider EngineProvider
+@inject Kubernator.Core.Validation.IValidator Validator
+
+<PageTitle>validate · kubernator</PageTitle>
+
+<h1>Validate</h1>
+<p class="subtitle">Spin up a disposable kind cluster, load the freshly built image, apply the manifests, probe a health endpoint.</p>
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+    <div class="form-row">
+        <label for="path">Path</label>
+        <InputText id="path" @bind-Value="form.Path" placeholder="C:/path/to/publish" />
+    </div>
+    <div class="form-row">
+        <label for="namespace">Namespace</label>
+        <InputText id="namespace" @bind-Value="form.Namespace" placeholder="default" />
+        <label for="replicas">Replicas</label>
+        <InputNumber id="replicas" @bind-Value="form.Replicas" />
+    </div>
+    <div class="form-row">
+        <label for="probe">Probe path</label>
+        <InputText id="probe" @bind-Value="form.ProbePath" placeholder="/health" />
+        <label for="cluster">Cluster name</label>
+        <InputText id="cluster" @bind-Value="form.ClusterName" placeholder="kubernator-test" />
+    </div>
+    <div class="form-row">
+        <label for="keep">Keep cluster after run</label>
+        <InputCheckbox id="keep" @bind-Value="form.KeepCluster" />
+        <label for="reuse">Reuse existing cluster</label>
+        <InputCheckbox id="reuse" @bind-Value="form.ReuseCluster" />
+    </div>
+    <div class="form-row">
+        <button type="submit" disabled="@busy">@(busy ? "validating…" : "validate")</button>
+    </div>
+    @if (error is not null)
+    {
+        <p class="error">@error</p>
+    }
+</EditForm>
+
+@if (log.Count > 0)
+{
+    <section class="result">
+        <h2>progress</h2>
+        <pre class="log">@string.Join('\n', log)</pre>
+    </section>
+}
+
+@if (result is not null)
+{
+    <section class="result">
+        <h2>steps</h2>
+        <ul class="file-list">
+            @foreach (var step in result.Steps)
+            {
+                <li>
+                    <span class="@(step.Ok ? "ok" : "error")">@(step.Ok ? "ok" : "fail")</span>
+                    &nbsp; <code>@step.Name</code>
+                    &nbsp; <span class="muted">@step.Duration.TotalSeconds.ToString("F1")s</span>
+                    @if (!step.Ok && step.Error is not null)
+                    {
+                        <div class="muted">@step.Error</div>
+                    }
+                </li>
+            }
+        </ul>
+        <p class="muted">cluster: <code>@result.ClusterName</code> @(result.ClusterStillRunning ? "(kept)" : "(deleted)")</p>
+    </section>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Path { get; set; } = string.Empty;
+        public string Namespace { get; set; } = "default";
+        public int Replicas { get; set; } = 1;
+        public string ProbePath { get; set; } = "/health";
+        public string ClusterName { get; set; } = "kubernator-test";
+        public bool KeepCluster { get; set; }
+        public bool ReuseCluster { get; set; }
+    }
+
+    private readonly Form form = new();
+    private Kubernator.Core.Validation.ValidationResult? result;
+    private string? error;
+    private bool busy;
+    private readonly List<string> log = new();
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Path))
+        {
+            error = "path is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        log.Clear();
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+
+        try
+        {
+            var resolved = System.IO.Path.GetFullPath(form.Path);
+            var descriptor = await Analysis.AnalyzeAsync(resolved);
+            var plan = Strategy.Plan(descriptor);
+
+            var staging = System.IO.Path.Combine(resolved, ".kubernator", "validate", "kubernetes");
+            await Generation.GenerateAsync(plan, new GenerationOptions
+            {
+                OutputDirectory = System.IO.Path.GetDirectoryName(staging)!,
+                Namespace = form.Namespace,
+                Replicas = form.Replicas,
+                OverwriteExisting = true
+            });
+
+            var engine = await EngineProvider.ResolveAsync();
+            await foreach (var line in engine.BuildAsync(new Kubernator.Core.Containers.BuildContext
+            {
+                ContextDirectory = resolved,
+                DockerfilePath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(staging)!, "Dockerfile"),
+                ImageName = plan.ImageName,
+                ImageTag = plan.ImageTag
+            }))
+            {
+                progress.Report(line);
+            }
+
+            var probePort = plan.ExposedPorts.Count > 0 ? plan.ExposedPorts[0] : (int?)null;
+            result = await Validator.ValidateAsync(new Kubernator.Core.Validation.ValidationOptions
+            {
+                ManifestsDirectory = staging,
+                ImageReference = plan.FullImageReference,
+                DeploymentName = plan.ImageName,
+                Namespace = form.Namespace,
+                ClusterName = form.ClusterName,
+                DeleteClusterOnComplete = !form.KeepCluster,
+                ReuseExistingCluster = form.ReuseCluster,
+                HttpProbePath = string.IsNullOrWhiteSpace(form.ProbePath) ? null : form.ProbePath,
+                HttpProbePort = probePort
+            }, progress);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}
