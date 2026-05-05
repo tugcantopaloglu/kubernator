@@ -69,6 +69,10 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
         [Description("Reproducible build epoch (RFC3339 timestamp or Unix seconds). Stamps manifest, SBOM, tar mtimes, and gzip header.")]
         public string? SourceDateEpoch { get; init; }
 
+        [CommandOption("--arch <platform>")]
+        [Description("Target platform (linux/amd64, linux/arm64, ...). Repeatable. Multi-platform requires docker buildx.")]
+        public string[]? Architectures { get; init; }
+
         [CommandOption("--hostname <host>")]
         public string? Hostname { get; init; }
 
@@ -175,13 +179,15 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
         {
             ImageName = settings.ImageName,
             ImageTag = settings.ImageTag,
-            Exposure = exposure
+            Exposure = exposure,
+            Platforms = settings.Architectures
         });
 
+        var requireMulti = (settings.Architectures?.Length ?? 0) > 1;
         IContainerEngine engine;
         try
         {
-            engine = await engineProvider.ResolveAsync();
+            engine = await engineProvider.ResolveAsync(requireMulti);
         }
         catch (InvalidOperationException ex)
         {
