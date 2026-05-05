@@ -61,6 +61,10 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
         [Description("Keep the staging directory after bundling (for inspection).")]
         public bool KeepScratch { get; init; }
 
+        [CommandOption("--compression <level>")]
+        [Description("gzip level: optimal (default) | fastest | smallest | none.")]
+        public string? Compression { get; init; }
+
         [CommandOption("--hostname <host>")]
         public string? Hostname { get; init; }
 
@@ -198,6 +202,15 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             settings.PdbMinAvailablePercent,
             settings.PdbMaxUnavailablePercent);
 
+        var compression = settings.Compression?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "optimal" => System.IO.Compression.CompressionLevel.Optimal,
+            "fastest" => System.IO.Compression.CompressionLevel.Fastest,
+            "smallest" => System.IO.Compression.CompressionLevel.SmallestSize,
+            "none" or "no" => System.IO.Compression.CompressionLevel.NoCompression,
+            var v => throw new InvalidOperationException($"unknown compression level: {v}")
+        };
+
         var options = new BundleOptions
         {
             OutputBundlePath = bundlePath,
@@ -206,7 +219,8 @@ internal sealed class BundleCommand : AsyncCommand<BundleCommand.Settings>
             KubernetesNamespace = settings.Namespace,
             Replicas = settings.Replicas ?? 1,
             KeepScratch = settings.KeepScratch,
-            Scaling = scaling
+            Scaling = scaling,
+            Compression = compression
         };
 
         BundleResult result;

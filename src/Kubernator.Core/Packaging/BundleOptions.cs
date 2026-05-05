@@ -1,3 +1,5 @@
+using System.IO.Compression;
+
 namespace Kubernator.Core.Packaging;
 
 public sealed record BundleOptions
@@ -10,6 +12,7 @@ public sealed record BundleOptions
     public bool BuildIfMissing { get; init; } = true;
     public bool KeepScratch { get; init; }
     public Generation.ScalingOptions? Scaling { get; init; }
+    public CompressionLevel Compression { get; init; } = CompressionLevel.Optimal;
 }
 
 public sealed record BundleResult

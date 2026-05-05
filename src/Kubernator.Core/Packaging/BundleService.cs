@@ -141,7 +141,7 @@ public sealed class BundleService : IBundleService
         await File.WriteAllTextAsync(checksumPath, string.Join('\n', checksumLines) + "\n", ct);
 
         Directory.CreateDirectory(Path.GetDirectoryName(options.OutputBundlePath)!);
-        await CreateTarGzAsync(options.ScratchDirectory, options.OutputBundlePath, ct);
+        await CreateTarGzAsync(options.ScratchDirectory, options.OutputBundlePath, options.Compression, ct);
 
         var bundleHash = await Sha256Hasher.HashFileAsync(options.OutputBundlePath, ct);
 
@@ -202,32 +202,36 @@ public sealed class BundleService : IBundleService
                 };
             }
 
-            var errors = new List<string>();
+            var errors = new System.Collections.Concurrent.ConcurrentBag<string>();
             var lines = await File.ReadAllLinesAsync(checksumPath, ct);
-            foreach (var line in lines)
-            {
-                if (string.IsNullOrWhiteSpace(line))
+            var work = lines
+                .Where(l => !string.IsNullOrWhiteSpace(l))
+                .Select(Sha256Hasher.ParseChecksumLine)
+                .ToArray();
+
+            await Parallel.ForEachAsync(
+                work,
+                new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = ct },
+                async (item, token) =>
                 {
-                    continue;
-                }
-                var (expected, relative) = Sha256Hasher.ParseChecksumLine(line);
-                var fullPath = Path.Combine(temp, relative);
-                if (!File.Exists(fullPath))
-                {
-                    errors.Add($"missing file: {relative}");
-                    continue;
-                }
-                var actual = await Sha256Hasher.HashFileAsync(fullPath, ct);
-                if (!string.Equals(actual, expected, StringComparison.Ordinal))
-                {
-                    errors.Add($"hash mismatch: {relative}");
-                }
-            }
+                    var (expected, relative) = item;
+                    var fullPath = Path.Combine(temp, relative);
+                    if (!File.Exists(fullPath))
+                    {
+                        errors.Add($"missing file: {relative}");
+                        return;
+                    }
+                    var actual = await Sha256Hasher.HashFileAsync(fullPath, token);
+                    if (!string.Equals(actual, expected, StringComparison.Ordinal))
+                    {
+                        errors.Add($"hash mismatch: {relative}");
+                    }
+                });
 
             return new BundleVerificationResult
             {
-                Ok = errors.Count == 0,
-                Errors = errors,
+                Ok = errors.IsEmpty,
+                Errors = errors.ToArray(),
                 Manifest = manifest
             };
         }
@@ -283,7 +287,7 @@ public sealed class BundleService : IBundleService
             var rel = Path.GetRelativePath(sourceAbsolute, file);
             var target = Path.Combine(contextDir, rel);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
+            HardLinkOrCopy(file, target);
         }
 
         var dockerfilePath = Path.Combine(contextDir, "Dockerfile");
@@ -403,6 +407,7 @@ public sealed class BundleService : IBundleService
         List<FileEntry> entries,
         CancellationToken ct)
     {
+        var candidates = new List<string>();
         foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
         {
             var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
@@ -418,20 +423,33 @@ public sealed class BundleService : IBundleService
             {
                 continue;
             }
-            var hash = await Sha256Hasher.HashFileAsync(file, ct);
-            entries.Add(new FileEntry
-            {
-                RelativePath = relative,
-                SizeBytes = new FileInfo(file).Length,
-                Sha256 = hash
-            });
+            candidates.Add(file);
         }
+
+        var hashed = new FileEntry[candidates.Count];
+        await Parallel.ForEachAsync(
+            Enumerable.Range(0, candidates.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount, CancellationToken = ct },
+            async (i, token) =>
+            {
+                var file = candidates[i];
+                var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
+                var hash = await Sha256Hasher.HashFileAsync(file, token);
+                hashed[i] = new FileEntry
+                {
+                    RelativePath = relative,
+                    SizeBytes = new FileInfo(file).Length,
+                    Sha256 = hash
+                };
+            });
+
+        entries.AddRange(hashed);
     }
 
-    private static async Task CreateTarGzAsync(string sourceDir, string outputPath, CancellationToken ct)
+    private static async Task CreateTarGzAsync(string sourceDir, string outputPath, CompressionLevel compression, CancellationToken ct)
     {
         await using var fileStream = File.Create(outputPath);
-        await using var gzip = new GZipStream(fileStream, CompressionLevel.Optimal);
+        await using var gzip = new GZipStream(fileStream, compression);
         await TarFile.CreateFromDirectoryAsync(sourceDir, gzip, includeBaseDirectory: false, ct);
     }
 
@@ -446,6 +464,29 @@ public sealed class BundleService : IBundleService
     {
         var version = Assembly.GetExecutingAssembly().GetName().Version;
         return version is null ? "0.1.0" : $"{version.Major}.{version.Minor}.{version.Build}";
+    }
+
+    private static void HardLinkOrCopy(string source, string target)
+    {
+        if (File.Exists(target))
+        {
+            File.Delete(target);
+        }
+        try
+        {
+            File.CreateSymbolicLink(target, source);
+            return;
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+        catch (IOException)
+        {
+        }
+        catch (PlatformNotSupportedException)
+        {
+        }
+        File.Copy(source, target, overwrite: true);
     }
 
     private static bool IsUnderneath(string candidate, string root)
