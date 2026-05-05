@@ -1,4 +1,4 @@
-[kubernator](img/kubernator.png)
+![kubernator](img/kubernator.png)
 
 # kubernator
 
