@@ -39,8 +39,16 @@ internal sealed class KeygenCommand : AsyncCommand<KeygenCommand.Settings>
         if (!settings.NoPassword)
         {
             passphrase = settings.Password
-                ?? Environment.GetEnvironmentVariable("KUBERNATOR_KEY_PASSWORD")
-                ?? AnsiConsole.Prompt(new TextPrompt<string>("Passphrase for new key:").Secret());
+                ?? Environment.GetEnvironmentVariable("KUBERNATOR_KEY_PASSWORD");
+            if (passphrase is null)
+            {
+                if (Console.IsInputRedirected)
+                {
+                    AnsiConsole.MarkupLine("[red]passphrase required (pass --password, --no-password, or set KUBERNATOR_KEY_PASSWORD)[/]");
+                    return 6;
+                }
+                passphrase = AnsiConsole.Prompt(new TextPrompt<string>("Passphrase for new key:").Secret());
+            }
             if (string.IsNullOrEmpty(passphrase))
             {
                 AnsiConsole.MarkupLine("[red]passphrase cannot be empty (use --no-password to skip encryption explicitly)[/]");
