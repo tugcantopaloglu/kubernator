@@ -101,6 +101,13 @@ app.Configure(config =>
         .WithExample("validate", "./publish")
         .WithExample("validate", "./publish", "--probe-path", "/health", "--keep-cluster");
 
+    config.AddCommand<DeployCommand>("deploy")
+        .WithDescription("Deploy generated manifests to a Kubernetes cluster via kubectl.")
+        .WithExample("deploy", "./publish", "--context", "kind-kubernator-test", "--namespace", "demo")
+        .WithExample("deploy", "./publish", "--context", "test-eu", "--dry-run")
+        .WithExample("deploy", "./publish", "--context", "prod-eu", "--allow-production")
+        .WithExample("deploy", "--list-contexts");
+
     config.AddCommand<DoctorCommand>("doctor")
         .WithDescription("Probe the local environment (engine, kubectl, kind, vulndb, state directory).")
         .WithExample("doctor");
