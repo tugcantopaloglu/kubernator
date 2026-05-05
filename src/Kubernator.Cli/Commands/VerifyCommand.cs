@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.IO.Compression;
+using Kubernator.Core.Audit;
 using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Spectre.Console;
@@ -10,11 +12,13 @@ internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
 {
     private readonly IBundleService bundleService;
     private readonly ICosignSigner signer;
+    private readonly InstallScriptAuditor scriptAuditor;
 
-    public VerifyCommand(IBundleService bundleService, ICosignSigner signer)
+    public VerifyCommand(IBundleService bundleService, ICosignSigner signer, InstallScriptAuditor scriptAuditor)
     {
         this.bundleService = bundleService;
         this.signer = signer;
+        this.scriptAuditor = scriptAuditor;
     }
 
     public sealed class Settings : CommandSettings
@@ -73,6 +77,33 @@ internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
         }
         AnsiConsole.MarkupLine("[green]integrity OK[/]");
 
+        var scriptResult = AuditInstallScript(path);
+        if (scriptResult is not null)
+        {
+            if (scriptResult.Findings.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[green]install.sh OK[/]");
+            }
+            else
+            {
+                foreach (var f in scriptResult.Findings.OrderByDescending(x => (int)x.Severity))
+                {
+                    var sev = f.Severity switch
+                    {
+                        AuditSeverity.Critical => "[red]critical[/]",
+                        AuditSeverity.Warning => "[yellow]warning[/]",
+                        _ => "[grey]info[/]"
+                    };
+                    AnsiConsole.MarkupLine($"  {sev} [grey]{Markup.Escape(f.Code)}[/] {Markup.Escape(f.Message)}");
+                }
+                if (!scriptResult.Pass)
+                {
+                    AnsiConsole.MarkupLine("[red]install.sh has critical findings[/]");
+                    return 5;
+                }
+            }
+        }
+
         var sigPath = settings.SignaturePath ?? path + ".sig";
         var pubPath = settings.PublicKeyPath
             ?? (File.Exists(path + ".pub") ? path + ".pub"
@@ -97,5 +128,33 @@ internal sealed class VerifyCommand : AsyncCommand<VerifyCommand.Settings>
         }
         AnsiConsole.MarkupLine($"[red]signature invalid:[/] {Markup.Escape(sigResult.Error ?? "unknown error")}");
         return 5;
+    }
+
+    private ManifestAuditResult? AuditInstallScript(string bundlePath)
+    {
+        try
+        {
+            using var archive = ZipFile.OpenRead(bundlePath);
+            var entry = archive.Entries.FirstOrDefault(e => e.FullName.Equals("scripts/install.sh", StringComparison.OrdinalIgnoreCase));
+            if (entry is null) return null;
+            var tmp = Path.Combine(Path.GetTempPath(), $"kubernator-install-{Guid.NewGuid():N}.sh");
+            entry.ExtractToFile(tmp, overwrite: true);
+            try
+            {
+                return scriptAuditor.AuditFile(tmp);
+            }
+            finally
+            {
+                try { File.Delete(tmp); } catch { }
+            }
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 }

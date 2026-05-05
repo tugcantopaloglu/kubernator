@@ -654,3 +654,8 @@ table.t td .pill { vertical-align: middle; }
 .auth-card label { font-size: var(--fs-12); color: var(--text-2); }
 .auth-card input { font: inherit; padding: var(--s-2) var(--s-3); background: var(--bg-0); border: 1px solid var(--border); border-radius: var(--r-2); color: var(--text-0); }
 .auth-card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.editor { display: grid; grid-template-columns: auto 1fr; border: 1px solid var(--border); border-radius: var(--r-2); background: var(--bg-1); overflow: hidden; }
+.editor-gutter { margin: 0; padding: var(--s-2) var(--s-3); background: var(--bg-2); color: var(--text-2); text-align: right; font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1.5; user-select: none; min-width: 3em; border-right: 1px solid var(--border); white-space: pre; }
+.editor-area { border: 0; padding: var(--s-2) var(--s-3); background: transparent; color: var(--text-0); font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1.5; min-height: 22rem; resize: vertical; outline: none; }
+.editor-area:focus { background: var(--bg-0); }

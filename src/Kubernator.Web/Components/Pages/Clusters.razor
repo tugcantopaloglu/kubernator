@@ -1,0 +1,209 @@
+@page "/clusters"
+@rendermode InteractiveServer
+@inject Kubernator.Core.Deployment.IClusterApplier Applier
+
+<PageTitle>clusters · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">tool</span>clusters</h1>
+    <p class="subtitle">register a remote Kubernetes context against the local kubeconfig so it shows up on the <a href="deploy">/deploy</a> dropdown.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>existing contexts</h2></div>
+    <div class="row" style="gap:8px">
+        <button class="btn btn-ghost" type="button" @onclick="LoadContexts" disabled="@busy">
+            <svg class="ico" width="14" height="14"><use href="#i-update" /></svg>
+            <span>refresh</span>
+        </button>
+    </div>
+    @if (contextsError is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body">@contextsError</div>
+        </div>
+    }
+    @if (contexts.Count == 0)
+    {
+        <p class="muted">no contexts found in kubeconfig.</p>
+    }
+    else
+    {
+        <ul class="file-list">
+            @foreach (var c in contexts)
+            {
+                <li>
+                    <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg>
+                    <span class="path"><code>@c.Name</code></span>
+                    @if (c.IsCurrent) { <span class="size">current</span> }
+                    @if (c.LooksProduction) { <span class="size">production</span> }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>register new context</h2></div>
+    <EditForm Model="@form" OnValidSubmit="@HandleRegister" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row span-2">
+                <label for="cl-name">name</label>
+                <InputText id="cl-name" @bind-Value="form.Name" placeholder="prod-eu" />
+            </div>
+            <div class="form-row">
+                <label for="cl-ns">default namespace<span class="opt">  optional</span></label>
+                <InputText id="cl-ns" @bind-Value="form.Namespace" />
+            </div>
+        </div>
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="cl-server">server URL</label>
+                <InputText id="cl-server" @bind-Value="form.ServerUrl" placeholder="https://10.0.0.42:6443" />
+            </div>
+            <div class="form-row span-2">
+                <label for="cl-ca">CA certificate (PEM)</label>
+                <textarea id="cl-ca" rows="6" style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:var(--fs-12)" @bind="form.CaCertificatePem" spellcheck="false"></textarea>
+            </div>
+        </div>
+        <div class="row wrap" style="gap:16px">
+            <label class="check"><InputCheckbox @bind-Value="form.SkipTlsVerify" /> skip TLS verify (not recommended)</label>
+        </div>
+
+        <div class="div-h"></div>
+        <div class="section-head"><h2>credentials</h2></div>
+        <div class="row" style="gap:8px; margin-bottom:var(--s-2)">
+            <button type="button" class="btn @(useToken ? "btn-primary" : "btn-ghost")" @onclick="() => useToken = true">bearer token</button>
+            <button type="button" class="btn @(useToken ? "btn-ghost" : "btn-primary")" @onclick="() => useToken = false">client cert</button>
+        </div>
+        @if (useToken)
+        {
+            <div class="form-grid">
+                <div class="form-row span-2">
+                    <label for="cl-tok">token</label>
+                    <input id="cl-tok" type="password" @bind="form.Token" />
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="form-grid">
+                <div class="form-row span-2">
+                    <label for="cl-cert">client certificate (PEM)</label>
+                    <textarea id="cl-cert" rows="5" style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:var(--fs-12)" @bind="form.ClientCertificatePem" spellcheck="false"></textarea>
+                </div>
+                <div class="form-row span-2">
+                    <label for="cl-key">client key (PEM)</label>
+                    <textarea id="cl-key" rows="5" style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:var(--fs-12)" @bind="form.ClientKeyPem" spellcheck="false"></textarea>
+                </div>
+            </div>
+        }
+
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@busy">
+                @if (busy) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg> }
+                <span>@(busy ? "registering…" : "register context")</span>
+            </button>
+        </div>
+        @if (registrationMessage is not null)
+        {
+            <div class="banner @(registrationOk ? "info" : "err")">
+                <svg class="ico" width="16" height="16"><use href="#@(registrationOk ? "i-check2" : "i-x")" /></svg>
+                <div class="banner-body">@registrationMessage</div>
+            </div>
+        }
+        @if (steps.Count > 0)
+        {
+            <ul class="file-list">
+                @foreach (var s in steps)
+                {
+                    <li><span class="path"><code>@s</code></span></li>
+                }
+            </ul>
+        }
+    </EditForm>
+</div>
+
+@code {
+    private sealed class Form
+    {
+        public string Name { get; set; } = string.Empty;
+        public string ServerUrl { get; set; } = string.Empty;
+        public string CaCertificatePem { get; set; } = string.Empty;
+        public string? Token { get; set; }
+        public string? ClientCertificatePem { get; set; }
+        public string? ClientKeyPem { get; set; }
+        public string? Namespace { get; set; }
+        public bool SkipTlsVerify { get; set; }
+    }
+
+    private readonly Form form = new();
+    private bool useToken = true;
+    private List<Kubernator.Core.Deployment.ClusterContext> contexts = new();
+    private string? contextsError;
+    private string? registrationMessage;
+    private bool registrationOk;
+    private List<string> steps = new();
+    private bool busy;
+
+    protected override async Task OnInitializedAsync() => await LoadContexts();
+
+    private async Task LoadContexts()
+    {
+        contextsError = null;
+        try
+        {
+            var ctxs = await Applier.ListContextsAsync();
+            contexts = ctxs.ToList();
+        }
+        catch (Exception ex)
+        {
+            contextsError = ex.Message;
+        }
+    }
+
+    private async Task HandleRegister()
+    {
+        registrationMessage = null;
+        steps.Clear();
+        if (string.IsNullOrWhiteSpace(form.Name) || string.IsNullOrWhiteSpace(form.ServerUrl))
+        {
+            registrationOk = false;
+            registrationMessage = "name and server URL are required";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var registration = new Kubernator.Core.Deployment.ClusterRegistration
+            {
+                Name = form.Name,
+                ServerUrl = form.ServerUrl,
+                CaCertificatePem = form.CaCertificatePem ?? string.Empty,
+                Token = useToken ? form.Token : null,
+                ClientCertificatePem = useToken ? null : form.ClientCertificatePem,
+                ClientKeyPem = useToken ? null : form.ClientKeyPem,
+                Namespace = form.Namespace,
+                SkipTlsVerify = form.SkipTlsVerify
+            };
+            var r = await Applier.RegisterContextAsync(registration);
+            steps = r.AppliedSteps.ToList();
+            registrationOk = r.Ok;
+            registrationMessage = r.Ok
+                ? $"context '{form.Name}' added — visible on /deploy"
+                : "registration failed: " + string.Join(" · ", r.Errors);
+            if (r.Ok) await LoadContexts();
+        }
+        catch (Exception ex)
+        {
+            registrationOk = false;
+            registrationMessage = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

@@ -157,4 +157,117 @@ public sealed class KubectlClusterApplier : IClusterApplier
             Errors = errors
         };
     }
+
+    public async Task<ClusterRegistrationResult> RegisterContextAsync(ClusterRegistration registration, string kubectlBinary = "kubectl", CancellationToken ct = default)
+    {
+        var errors = new List<string>();
+        var steps = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(registration.Name) || !System.Text.RegularExpressions.Regex.IsMatch(registration.Name, "^[A-Za-z0-9._-]+$"))
+        {
+            errors.Add("name must be non-empty and only contain letters, digits, dot, dash, underscore");
+        }
+        if (string.IsNullOrWhiteSpace(registration.ServerUrl) || !Uri.TryCreate(registration.ServerUrl, UriKind.Absolute, out var serverUri)
+            || (serverUri.Scheme != "https" && serverUri.Scheme != "http"))
+        {
+            errors.Add("server url must be an absolute http(s) URL");
+        }
+        if (string.IsNullOrWhiteSpace(registration.Token)
+            && string.IsNullOrWhiteSpace(registration.ClientCertificatePem))
+        {
+            errors.Add("either a bearer token or a client-certificate/key pair is required");
+        }
+        if (errors.Count > 0)
+        {
+            return new ClusterRegistrationResult { Ok = false, Errors = errors, AppliedSteps = steps };
+        }
+
+        var tmpDir = Path.Combine(Path.GetTempPath(), $"kubernator-ctx-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmpDir);
+        try
+        {
+            var clusterArgs = new List<string> { "config", "set-cluster", registration.Name, "--server=" + registration.ServerUrl };
+            if (registration.SkipTlsVerify)
+            {
+                clusterArgs.Add("--insecure-skip-tls-verify=true");
+            }
+            else
+            {
+                if (string.IsNullOrWhiteSpace(registration.CaCertificatePem))
+                {
+                    errors.Add("CA certificate (PEM) is required unless skip-tls-verify is set");
+                    return new ClusterRegistrationResult { Ok = false, Errors = errors, AppliedSteps = steps };
+                }
+                var caPath = Path.Combine(tmpDir, "ca.crt");
+                await File.WriteAllTextAsync(caPath, registration.CaCertificatePem, ct);
+                clusterArgs.Add("--certificate-authority=" + caPath);
+                clusterArgs.Add("--embed-certs=true");
+            }
+            var clusterOutcome = await runner.RunAsync(new ProcessInvocation
+            {
+                FileName = kubectlBinary,
+                Arguments = clusterArgs,
+                Timeout = TimeSpan.FromSeconds(15)
+            }, ct);
+            steps.Add("set-cluster: " + (clusterOutcome.Ok ? "ok" : "fail"));
+            if (!clusterOutcome.Ok)
+            {
+                errors.Add(clusterOutcome.StandardError.Trim());
+                return new ClusterRegistrationResult { Ok = false, Errors = errors, AppliedSteps = steps };
+            }
+
+            var userName = registration.Name + "-user";
+            var credArgs = new List<string> { "config", "set-credentials", userName };
+            if (!string.IsNullOrWhiteSpace(registration.Token))
+            {
+                credArgs.Add("--token=" + registration.Token);
+            }
+            else
+            {
+                var certPath = Path.Combine(tmpDir, "client.crt");
+                var keyPath = Path.Combine(tmpDir, "client.key");
+                await File.WriteAllTextAsync(certPath, registration.ClientCertificatePem!, ct);
+                await File.WriteAllTextAsync(keyPath, registration.ClientKeyPem ?? string.Empty, ct);
+                credArgs.Add("--client-certificate=" + certPath);
+                credArgs.Add("--client-key=" + keyPath);
+                credArgs.Add("--embed-certs=true");
+            }
+            var credOutcome = await runner.RunAsync(new ProcessInvocation
+            {
+                FileName = kubectlBinary,
+                Arguments = credArgs,
+                Timeout = TimeSpan.FromSeconds(15)
+            }, ct);
+            steps.Add("set-credentials: " + (credOutcome.Ok ? "ok" : "fail"));
+            if (!credOutcome.Ok)
+            {
+                errors.Add(credOutcome.StandardError.Trim());
+                return new ClusterRegistrationResult { Ok = false, Errors = errors, AppliedSteps = steps };
+            }
+
+            var ctxArgs = new List<string> { "config", "set-context", registration.Name, "--cluster=" + registration.Name, "--user=" + userName };
+            if (!string.IsNullOrWhiteSpace(registration.Namespace))
+            {
+                ctxArgs.Add("--namespace=" + registration.Namespace);
+            }
+            var ctxOutcome = await runner.RunAsync(new ProcessInvocation
+            {
+                FileName = kubectlBinary,
+                Arguments = ctxArgs,
+                Timeout = TimeSpan.FromSeconds(15)
+            }, ct);
+            steps.Add("set-context: " + (ctxOutcome.Ok ? "ok" : "fail"));
+            if (!ctxOutcome.Ok)
+            {
+                errors.Add(ctxOutcome.StandardError.Trim());
+                return new ClusterRegistrationResult { Ok = false, Errors = errors, AppliedSteps = steps };
+            }
+
+            return new ClusterRegistrationResult { Ok = true, Errors = errors, AppliedSteps = steps };
+        }
+        finally
+        {
+            try { Directory.Delete(tmpDir, recursive: true); } catch { }
+        }
+    }
 }

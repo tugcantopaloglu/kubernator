@@ -38,7 +38,11 @@ public static class Totp
     }
 
     public static bool Verify(string base32Secret, string code, int allowedSkew = 1)
+        => VerifyWithCounter(base32Secret, code, allowedSkew, out _);
+
+    public static bool VerifyWithCounter(string base32Secret, string code, int allowedSkew, out long matchedCounter)
     {
+        matchedCounter = -1;
         if (string.IsNullOrEmpty(base32Secret) || string.IsNullOrWhiteSpace(code)) return false;
         var trimmed = code.Replace(" ", "").Replace("-", "");
         if (trimmed.Length != DefaultDigits) return false;
@@ -50,6 +54,7 @@ public static class Totp
             var candidate = Encoding.ASCII.GetBytes(ComputeCode(base32Secret, window));
             if (CryptographicOperations.FixedTimeEquals(candidate, expectedBytes))
             {
+                matchedCounter = window.ToUnixTimeSeconds() / DefaultPeriodSeconds;
                 return true;
             }
         }

@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using Kubernator.Core.Containers;
 using Kubernator.Core.Validation;
+using Kubernator.Core.Vault;
 using Kubernator.Core.Vulnerabilities;
 
 namespace Kubernator.Core.Diagnostics;
@@ -11,15 +12,18 @@ public sealed class DiagnosticsService : IDiagnosticsService
     private readonly IProcessRunner runner;
     private readonly IContainerEngineProvider engineProvider;
     private readonly IVulnerabilityDatabase vulnDb;
+    private readonly IKeyVault vault;
 
     public DiagnosticsService(
         IProcessRunner runner,
         IContainerEngineProvider engineProvider,
-        IVulnerabilityDatabase vulnDb)
+        IVulnerabilityDatabase vulnDb,
+        IKeyVault vault)
     {
         this.runner = runner;
         this.engineProvider = engineProvider;
         this.vulnDb = vulnDb;
+        this.vault = vault;
     }
 
     public async Task<DiagnosticReport> RunAsync(CancellationToken ct = default)
@@ -32,6 +36,8 @@ public sealed class DiagnosticsService : IDiagnosticsService
         checks.Add(await CheckExternalToolAsync("kind", ["version"], ct,
             hint: "needed for kubernator validate (creates ephemeral cluster)"));
         checks.Add(CheckVulnDb());
+        checks.Add(await CheckVaultAsync(ct));
+        checks.Add(CheckAuthAccount());
         checks.Add(CheckHomeDirectoryWritable());
 
         var asm = typeof(DiagnosticsService).Assembly;
@@ -147,6 +153,65 @@ public sealed class DiagnosticsService : IDiagnosticsService
             return new DiagnosticCheck
             {
                 Name = "vulndb",
+                Status = DiagnosticStatus.Warn,
+                Message = ex.Message
+            };
+        }
+    }
+
+    private async Task<DiagnosticCheck> CheckVaultAsync(CancellationToken ct)
+    {
+        try
+        {
+            var entries = await vault.ListAsync(ct);
+            return new DiagnosticCheck
+            {
+                Name = "key vault",
+                Status = DiagnosticStatus.Ok,
+                Message = entries.Count == 0 ? $"empty ({vault.RootDirectory})" : $"{entries.Count} entry/ies at {vault.RootDirectory}"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new DiagnosticCheck
+            {
+                Name = "key vault",
+                Status = DiagnosticStatus.Warn,
+                Message = ex.Message
+            };
+        }
+    }
+
+    private static DiagnosticCheck CheckAuthAccount()
+    {
+        var home = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kubernator");
+        var path = Path.Combine(home, "auth", "account.json");
+        if (!File.Exists(path))
+        {
+            return new DiagnosticCheck
+            {
+                Name = "web auth account",
+                Status = DiagnosticStatus.Info,
+                Message = "not configured",
+                Hint = "open the web UI; first request lands on /auth/setup"
+            };
+        }
+        try
+        {
+            var size = new FileInfo(path).Length;
+            return new DiagnosticCheck
+            {
+                Name = "web auth account",
+                Status = DiagnosticStatus.Ok,
+                Message = $"configured · {size} B at {path}"
+            };
+        }
+        catch (Exception ex)
+        {
+            return new DiagnosticCheck
+            {
+                Name = "web auth account",
                 Status = DiagnosticStatus.Warn,
                 Message = ex.Message
             };

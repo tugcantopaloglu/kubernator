@@ -15,7 +15,15 @@ else
     <div class="auth-page">
         <div class="auth-card">
             <h1>sign in</h1>
-            <p class="muted">kubernator requires a username, password, and a 6-digit TOTP code from your authenticator app.</p>
+            <p class="muted">username + password + 6-digit code from your authenticator. switch to a recovery code if your device is unavailable.</p>
+            <div class="row" style="gap:8px; margin-bottom:var(--s-2)">
+                <button type="button" class="btn @(useRecovery ? "btn-ghost" : "btn-primary")" @onclick="() => useRecovery = false">
+                    <span>authenticator</span>
+                </button>
+                <button type="button" class="btn @(useRecovery ? "btn-primary" : "btn-ghost")" @onclick="() => useRecovery = true">
+                    <span>recovery code</span>
+                </button>
+            </div>
             <form method="post" action="/api/auth/login">
                 <AntiforgeryToken />
                 <input type="hidden" name="returnUrl" value="@ReturnUrl" />
@@ -27,10 +35,20 @@ else
                     <label for="password">password</label>
                     <input id="password" name="password" type="password" autocomplete="current-password" required />
                 </div>
-                <div class="form-row">
-                    <label for="code">authenticator code</label>
-                    <input id="code" name="code" inputmode="numeric" pattern="[0-9 -]*" autocomplete="one-time-code" required maxlength="9" />
-                </div>
+                @if (!useRecovery)
+                {
+                    <div class="form-row">
+                        <label for="code">authenticator code</label>
+                        <input id="code" name="code" inputmode="numeric" pattern="[0-9 -]*" autocomplete="one-time-code" required maxlength="9" />
+                    </div>
+                }
+                else
+                {
+                    <div class="form-row">
+                        <label for="recovery">recovery code</label>
+                        <input id="recovery" name="recovery" autocomplete="off" required placeholder="xxxxx-xxxxx" />
+                    </div>
+                }
                 @if (!string.IsNullOrEmpty(ErrorMessage))
                 {
                     <div class="banner err">
@@ -52,6 +70,7 @@ else
     [SupplyParameterFromQuery(Name = "error")] public string? ErrorMessage { get; set; }
 
     private bool notConfigured;
+    private bool useRecovery;
 
     protected override async Task OnInitializedAsync()
     {

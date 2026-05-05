@@ -21,7 +21,6 @@ builder.Services.AddKubernatorCore();
 builder.Services.AddKubernatorRuntime();
 builder.Services.AddSingleton<ArtifactRegistry>();
 builder.Services.AddScoped<BuildPipeline>();
-builder.Services.AddSingleton<ManifestAuditor>();
 builder.Services.AddSingleton<AuthService>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -190,16 +189,28 @@ app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntifo
     var username = form["username"].ToString();
     var password = form["password"].ToString();
     var code = form["code"].ToString();
+    var recovery = form["recovery"].ToString();
     var returnUrl = form["returnUrl"].ToString();
     if (!IsLocalRelativeUrl(returnUrl))
     {
         returnUrl = "/";
     }
 
-    var ok = await auth.SignInAsync(username, password, code);
-    if (!ok)
+    SignInResult result = !string.IsNullOrEmpty(recovery)
+        ? await auth.SignInWithRecoveryAsync(username, password, recovery)
+        : await auth.SignInAsync(username, password, code);
+
+    if (result.Outcome != SignInOutcome.Ok)
     {
-        var qs = "?error=" + Uri.EscapeDataString("invalid credentials or one-time code");
+        var msg = result.Outcome switch
+        {
+            SignInOutcome.LockedOut => $"too many failed attempts — try again after {result.LockoutUntil:HH:mm} UTC",
+            SignInOutcome.Replay => result.Message ?? "this code was already used",
+            _ => result.RemainingAttempts > 0
+                ? $"invalid credentials or one-time code ({result.RemainingAttempts} attempt(s) left before lockout)"
+                : "invalid credentials or one-time code"
+        };
+        var qs = "?error=" + Uri.EscapeDataString(msg);
         if (!string.IsNullOrEmpty(returnUrl) && returnUrl != "/")
         {
             qs += "&returnUrl=" + Uri.EscapeDataString(returnUrl);
@@ -210,12 +221,27 @@ app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntifo
     var claims = new[]
     {
         new Claim(ClaimTypes.Name, username.Trim()),
-        new Claim("auth_method", "password+totp")
+        new Claim("auth_method", string.IsNullOrEmpty(recovery) ? "password+totp" : "password+recovery")
     };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     var principal = new ClaimsPrincipal(identity);
     await req.HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
     return Results.Redirect(returnUrl);
+}).AllowAnonymous();
+
+app.MapPost("/api/auth/setup/test-totp", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
+{
+    await antiforgery.ValidateRequestAsync(req.HttpContext);
+    var form = await req.ReadFormAsync();
+    var ticket = form["ticket"].ToString();
+    var code = form["code"].ToString();
+    if (auth.PeekSetupTicket(ticket) is null)
+    {
+        return Results.Redirect("/auth/setup-complete?error=" + Uri.EscapeDataString("setup ticket expired"));
+    }
+    var ok = auth.TestTotpCode(code);
+    var qs = ok ? "&verified=1" : "&error=" + Uri.EscapeDataString("authenticator code did not match — re-scan the secret");
+    return Results.Redirect("/auth/setup-complete?ticket=" + Uri.EscapeDataString(ticket) + qs);
 }).AllowAnonymous();
 
 app.MapPost("/api/auth/logout", async (HttpContext ctx, IAntiforgery antiforgery) =>

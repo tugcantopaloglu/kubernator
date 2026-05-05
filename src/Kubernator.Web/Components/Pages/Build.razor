@@ -53,6 +53,12 @@
     <div class="row wrap" style="gap:16px">
         <label class="check"><InputCheckbox @bind-Value="form.NoBuild" /> generate only (skip container build)</label>
     </div>
+    <div class="form-grid" style="margin-top:var(--s-3)">
+        <div class="form-row span-2">
+            <label for="bd-plat">platforms<span class="opt">  optional, comma-separated · requires Docker buildx</span></label>
+            <InputText id="bd-plat" @bind-Value="form.Platforms" placeholder="linux/amd64,linux/arm64" />
+        </div>
+    </div>
 
     <div class="row" style="gap:8px; margin-top:var(--s-3)">
         <button class="btn btn-primary" type="submit" disabled="@busy">
@@ -136,6 +142,7 @@
         public string? ImageName { get; set; }
         public string? ImageTag { get; set; }
         public bool NoBuild { get; set; }
+        public string? Platforms { get; set; }
     }
 
     private readonly Form form = new();
@@ -180,13 +187,17 @@
         });
         try
         {
+            var platforms = string.IsNullOrWhiteSpace(form.Platforms)
+                ? null
+                : form.Platforms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             result = await Pipeline.RunAsync(new BuildPipelineRequest
             {
                 Path = form.Path,
                 OutputDirectory = string.IsNullOrWhiteSpace(form.OutputDirectory) ? null : form.OutputDirectory,
                 ImageName = form.ImageName,
                 ImageTag = form.ImageTag,
-                NoBuild = form.NoBuild
+                NoBuild = form.NoBuild,
+                Platforms = platforms
             }, progress);
         }
         catch (Exception ex)

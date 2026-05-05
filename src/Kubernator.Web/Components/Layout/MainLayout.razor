@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Authentication
 @inject Microsoft.Extensions.Configuration.IConfiguration Config
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @inject IHttpContextAccessor HttpContextAccessor
@@ -48,7 +49,7 @@
 
     <NavMenu />
 
-    <main class="content">
+    <main class="content" data-session-expires="@SessionExpiresIso">
         @{
             var bind = Config["bind"] ?? "127.0.0.1:5050";
             var token = Config["token"];
@@ -67,19 +68,33 @@
             </div>
         }
 
+        <AuthorizeView>
+            <Authorized>
+                <div id="session-banner" class="banner" role="alert" hidden>
+                    <svg class="ico" width="16" height="16"><use href="#i-warn" /></svg>
+                    <div class="banner-body"><span class="label">session</span><span id="session-banner-text"></span></div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
         @Body
     </main>
+    <script src="js/session-timeout.js" defer></script>
 </div>
 
 @code {
     private string? AntiforgeryToken { get; set; }
+    private string? SessionExpiresIso { get; set; }
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         var http = HttpContextAccessor.HttpContext;
-        if (http is not null)
+        if (http is null) return;
+        AntiforgeryToken = Antiforgery.GetAndStoreTokens(http).RequestToken;
+        var auth = await http.AuthenticateAsync(Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+        if (auth.Succeeded && auth.Properties?.ExpiresUtc is { } exp)
         {
-            AntiforgeryToken = Antiforgery.GetAndStoreTokens(http).RequestToken;
+            SessionExpiresIso = exp.UtcDateTime.ToString("O");
         }
     }
 }

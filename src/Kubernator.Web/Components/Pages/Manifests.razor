@@ -91,7 +91,13 @@
                     {
                         <li>
                             <svg class="ico" width="14" height="14"><use href="#@SeverityIcon(f.Severity)" /></svg>
-                            <span class="path"><code>@f.Code</code> @f.Message</span>
+                            <span class="path">
+                                <code>@f.Code</code> @f.Message
+                                @if (!string.IsNullOrEmpty(f.FixHint))
+                                {
+                                    <div class="muted" style="font-size:var(--fs-11); margin-top:2px">↳ fix: @f.FixHint</div>
+                                }
+                            </span>
                             <span class="size">@f.Severity.ToString().ToLowerInvariant()</span>
                         </li>
                     }
@@ -106,9 +112,12 @@
     <div class="section">
         <div class="section-head">
             <h2>edit</h2>
-            <span class="meta"><code>@currentFile</code></span>
+            <span class="meta"><code>@currentFile</code> · @LineCount line(s)</span>
         </div>
-        <textarea class="log" rows="22" style="width:100%; resize:vertical" @bind="currentContent" spellcheck="false"></textarea>
+        <div class="editor">
+            <pre class="editor-gutter" aria-hidden="true">@LineNumbers</pre>
+            <textarea class="editor-area" rows="22" @bind="currentContent" spellcheck="false"></textarea>
+        </div>
         <div class="row" style="gap:8px; margin-top:var(--s-3)">
             <button class="btn btn-primary" type="button" @onclick="SaveFile" disabled="@busy">
                 @if (busy) { <span class="spinner"></span> }
@@ -219,6 +228,21 @@
         finally
         {
             busy = false;
+        }
+    }
+
+    private int LineCount => string.IsNullOrEmpty(currentContent) ? 1 : currentContent.Count(c => c == '\n') + 1;
+
+    private string LineNumbers
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            for (var i = 1; i <= LineCount; i++)
+            {
+                sb.Append(i).Append('\n');
+            }
+            return sb.ToString();
         }
     }
 

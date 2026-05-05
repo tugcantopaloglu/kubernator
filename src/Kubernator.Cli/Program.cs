@@ -108,6 +108,17 @@ app.Configure(config =>
         .WithExample("deploy", "./publish", "--context", "prod-eu", "--allow-production")
         .WithExample("deploy", "--list-contexts");
 
+    config.AddCommand<AuditCommand>("audit")
+        .WithDescription("Audit a manifests directory against the kubernator secure baseline (AUD codes).")
+        .WithExample("audit", "./publish/.kubernator/kubernetes")
+        .WithExample("audit", "./publish/.kubernator/kubernetes", "--namespace", "shop", "--fail-on", "warning");
+
+    config.AddCommand<VaultCommand>("vault")
+        .WithDescription("Manage the local key & cert vault (list / import / remove).")
+        .WithExample("vault", "list")
+        .WithExample("vault", "import", "--name", "prod-cosign", "--kind", "private", "--from", "./cosign.key", "--encrypted")
+        .WithExample("vault", "remove", "--id", "ab12cd34");
+
     config.AddCommand<DoctorCommand>("doctor")
         .WithDescription("Probe the local environment (engine, kubectl, kind, vulndb, state directory).")
         .WithExample("doctor");

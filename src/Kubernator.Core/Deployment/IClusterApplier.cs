@@ -37,9 +37,30 @@ public sealed record DeployResult
     public required IReadOnlyList<string> Errors { get; init; }
 }
 
+public sealed record ClusterRegistration
+{
+    public required string Name { get; init; }
+    public required string ServerUrl { get; init; }
+    public required string CaCertificatePem { get; init; }
+    public string? Token { get; init; }
+    public string? ClientCertificatePem { get; init; }
+    public string? ClientKeyPem { get; init; }
+    public string? Namespace { get; init; }
+    public bool SkipTlsVerify { get; init; }
+}
+
+public sealed record ClusterRegistrationResult
+{
+    public required bool Ok { get; init; }
+    public required IReadOnlyList<string> Errors { get; init; }
+    public required IReadOnlyList<string> AppliedSteps { get; init; }
+}
+
 public interface IClusterApplier
 {
     Task<IReadOnlyList<ClusterContext>> ListContextsAsync(string kubectlBinary = "kubectl", CancellationToken ct = default);
 
     Task<DeployResult> ApplyAsync(DeployOptions options, IProgress<string>? progress = null, CancellationToken ct = default);
+
+    Task<ClusterRegistrationResult> RegisterContextAsync(ClusterRegistration registration, string kubectlBinary = "kubectl", CancellationToken ct = default);
 }

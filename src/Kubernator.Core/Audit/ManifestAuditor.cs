@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Kubernator.Web.Services;
+namespace Kubernator.Core.Audit;
 
 public enum AuditSeverity
 {
@@ -15,6 +15,7 @@ public sealed record AuditFinding
     public required string Code { get; init; }
     public required string Message { get; init; }
     public string? FilePath { get; init; }
+    public string? FixHint { get; init; }
 }
 
 public sealed record ManifestAuditResult
@@ -36,6 +37,7 @@ public sealed class ManifestAuditor
         "registry.k8s.io/"
     ];
 
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822", Justification = "DI-resolved auditor; instance-bound for testability and future state.")]
     public ManifestAuditResult AuditDirectory(string directory, string? expectedNamespace = null)
     {
         var files = Directory.Exists(directory)
@@ -197,7 +199,8 @@ public sealed class ManifestAuditor
         Severity = AuditSeverity.Critical,
         Code = code,
         Message = message,
-        FilePath = file
+        FilePath = file,
+        FixHint = FixHints.GetValueOrDefault(code)
     };
 
     private static AuditFinding Warn(string code, string message, string? file = null) => new()
@@ -205,6 +208,26 @@ public sealed class ManifestAuditor
         Severity = AuditSeverity.Warning,
         Code = code,
         Message = message,
-        FilePath = file
+        FilePath = file,
+        FixHint = FixHints.GetValueOrDefault(code)
+    };
+
+    private static readonly IReadOnlyDictionary<string, string> FixHints = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["AUD101"] = "add `runAsNonRoot: true` under spec.template.spec.securityContext",
+        ["AUD102"] = "add `readOnlyRootFilesystem: true` under each container's securityContext",
+        ["AUD103"] = "add `allowPrivilegeEscalation: false` under each container's securityContext",
+        ["AUD104"] = "add `capabilities: { drop: [ALL] }` under each container's securityContext",
+        ["AUD105"] = "add `automountServiceAccountToken: false` to spec.template.spec",
+        ["AUD106"] = "add `seccompProfile: { type: RuntimeDefault }` under spec.template.spec.securityContext",
+        ["AUD110"] = "remove `hostNetwork: true`",
+        ["AUD111"] = "remove `hostPID: true`",
+        ["AUD112"] = "remove `privileged: true` from container.securityContext",
+        ["AUD113"] = "set `runAsUser` to a non-zero UID such as 1654 or 65532",
+        ["AUD120"] = "add `resources: { requests: {cpu, memory}, limits: {cpu, memory} }` to each container",
+        ["AUD200"] = "add a NetworkPolicy with default-deny ingress + egress (kubernator's generator does this for you)",
+        ["AUD201"] = "set `policyTypes: [Ingress, Egress]` on the NetworkPolicy",
+        ["AUD301"] = "pin the image to an immutable digest: `image@sha256:...`",
+        ["AUD401"] = "set `metadata.namespace` to match the deploy target on every resource"
     };
 }

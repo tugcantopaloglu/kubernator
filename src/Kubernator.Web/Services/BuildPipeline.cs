@@ -12,6 +12,7 @@ public sealed record BuildPipelineRequest
     public string? ImageName { get; init; }
     public string? ImageTag { get; init; }
     public bool NoBuild { get; init; }
+    public IReadOnlyList<string>? Platforms { get; init; }
 }
 
 public sealed record BuildPipelineResult
@@ -80,8 +81,13 @@ public sealed class BuildPipeline
             };
         }
 
-        var engine = await engineProvider.ResolveAsync(ct);
+        var requireMulti = request.Platforms is { Count: > 0 } && request.Platforms.Any(p => !string.IsNullOrWhiteSpace(p));
+        var engine = await engineProvider.ResolveAsync(requireMulti, ct);
         var info = await engine.GetInfoAsync(ct);
+        if (requireMulti && !engine.SupportsMultiPlatform)
+        {
+            throw new InvalidOperationException("the resolved container engine does not support multi-platform builds; install Docker Buildx or run a single-platform build");
+        }
         progress?.Report($"engine {info.Name} {info.Version} ({info.OperatingSystem}/{info.Architecture})");
 
         var stagingDir = Path.Combine(output, "build-context");
@@ -106,7 +112,8 @@ public sealed class BuildPipeline
             ContextDirectory = stagingDir,
             DockerfilePath = Path.Combine(stagingDir, "Dockerfile"),
             ImageName = plan.ImageName,
-            ImageTag = plan.ImageTag
+            ImageTag = plan.ImageTag,
+            Platforms = request.Platforms is { Count: > 0 } ? request.Platforms.Where(p => !string.IsNullOrWhiteSpace(p)).ToArray() : Array.Empty<string>()
         };
 
         progress?.Report($"building {plan.FullImageReference}");

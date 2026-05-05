@@ -9,9 +9,9 @@
 <div class="auth-page">
     <div class="auth-card auth-card-wide">
         <h1>save your TOTP secret</h1>
-        <p class="muted">add this secret to your authenticator app (Aegis, 1Password, Authy, Google Authenticator, etc.) <strong>before</strong> you sign in. you cannot recover it later — only reset by deleting <code>~/.kubernator/auth/account.json</code>.</p>
+        <p class="muted">add this secret to your authenticator app (Aegis, 1Password, Authy, Google Authenticator, etc.) and verify the code below before you sign in. <strong>this page only renders the secret and recovery codes once.</strong></p>
 
-        @if (claimedResult is null)
+        @if (peeked is null && !verified)
         {
             <div class="banner err">
                 <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
@@ -20,29 +20,14 @@
                 </div>
             </div>
         }
-        else
+        else if (verified)
         {
-            <div class="card-grid">
-                <div class="fact-card">
-                    <div class="fact-label">account</div>
-                    <div class="fact-value"><code>@claimedResult.Account.Username</code></div>
-                </div>
-                <div class="fact-card">
-                    <div class="fact-label">TOTP secret (base32)</div>
-                    <div class="fact-value"><code style="word-break:break-all">@claimedResult.Account.TotpSecret</code></div>
-                </div>
-                <div class="fact-card">
-                    <div class="fact-label">otpauth URI</div>
-                    <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@claimedResult.OtpAuthUri</code></div>
-                    <div class="muted" style="font-size:var(--fs-11)">paste this into a QR generator if your app needs a QR code.</div>
+            <div class="banner info">
+                <svg class="ico" width="16" height="16"><use href="#i-check2" /></svg>
+                <div class="banner-body">
+                    authenticator code verified · setup complete. you can now sign in.
                 </div>
             </div>
-
-            <div class="banner info" style="margin-top:var(--s-3)">
-                <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
-                <div class="banner-body">this page only renders the secret once — refreshing or going back loses it.</div>
-            </div>
-
             <div style="margin-top:var(--s-4)">
                 <a class="btn btn-primary" href="/auth/login">
                     <svg class="ico" width="14" height="14"><use href="#i-shield" /></svg>
@@ -50,19 +35,80 @@
                 </a>
             </div>
         }
+        else if (peeked is not null)
+        {
+            <div class="card-grid">
+                <div class="fact-card">
+                    <div class="fact-label">account</div>
+                    <div class="fact-value"><code>@peeked.Account.Username</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">TOTP secret (base32)</div>
+                    <div class="fact-value"><code style="word-break:break-all">@peeked.Account.TotpSecret</code></div>
+                </div>
+                <div class="fact-card">
+                    <div class="fact-label">otpauth URI</div>
+                    <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@peeked.OtpAuthUri</code></div>
+                    <div class="muted" style="font-size:var(--fs-11)">paste into a QR generator if your app needs a QR code.</div>
+                </div>
+            </div>
+
+            <div class="section-head" style="margin-top:var(--s-4)"><h2>recovery codes</h2></div>
+            <p class="muted">store these somewhere safe. each one can be used once instead of an authenticator code if you lose your device.</p>
+            <ul class="file-list">
+                @foreach (var c in peeked.RecoveryCodes)
+                {
+                    <li><span class="path"><code>@c</code></span></li>
+                }
+            </ul>
+
+            <div class="section-head" style="margin-top:var(--s-4)"><h2>verify authenticator</h2></div>
+            <p class="muted">enter the current 6-digit code from your authenticator app to confirm setup. you cannot finish until this passes.</p>
+            <form method="post" action="/api/auth/setup/test-totp">
+                <AntiforgeryToken />
+                <input type="hidden" name="ticket" value="@Ticket" />
+                <div class="form-row">
+                    <label for="verify-code">authenticator code</label>
+                    <input id="verify-code" name="code" inputmode="numeric" pattern="[0-9 -]*" autocomplete="one-time-code" required maxlength="9" />
+                </div>
+                @if (!string.IsNullOrEmpty(ErrorMessage))
+                {
+                    <div class="banner err">
+                        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                        <div class="banner-body">@ErrorMessage</div>
+                    </div>
+                }
+                <button class="btn btn-primary" type="submit">
+                    <svg class="ico" width="14" height="14"><use href="#i-check2" /></svg>
+                    <span>verify code</span>
+                </button>
+            </form>
+        }
     </div>
 </div>
 
 @code {
     [SupplyParameterFromQuery] public string? Ticket { get; set; }
+    [SupplyParameterFromQuery(Name = "verified")] public string? VerifiedFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] public string? ErrorMessage { get; set; }
 
-    private SetupResult? claimedResult;
+    private SetupResult? peeked;
+    private bool verified;
 
     protected override void OnInitialized()
     {
+        verified = VerifiedFlag == "1";
+        if (verified)
+        {
+            if (!string.IsNullOrEmpty(Ticket))
+            {
+                Auth.ConsumeSetupTicket(Ticket);
+            }
+            return;
+        }
         if (!string.IsNullOrEmpty(Ticket))
         {
-            claimedResult = Auth.ConsumeSetupTicket(Ticket);
+            peeked = Auth.PeekSetupTicket(Ticket);
         }
     }
 }

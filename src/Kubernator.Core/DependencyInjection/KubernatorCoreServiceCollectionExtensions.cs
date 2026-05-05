@@ -1,5 +1,6 @@
 using Kubernator.Core.Abstractions;
 using Kubernator.Core.Analysis;
+using Kubernator.Core.Audit;
 using Kubernator.Core.Analysis.DotNet;
 using Kubernator.Core.Analysis.Go;
 using Kubernator.Core.Analysis.Java;
@@ -56,6 +57,8 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IGenerationService, GenerationService>();
         services.TryAddSingleton<IBundleService, BundleService>();
         services.TryAddSingleton<IKeyVault>(_ => FileKeyVault.Default());
+        services.TryAddSingleton<ManifestAuditor>();
+        services.TryAddSingleton<InstallScriptAuditor>();
         services.TryAddSingleton<ICosignSigner, CosignSigner>();
         services.TryAddSingleton<IPipelineService, PipelineService>();
         services.TryAddSingleton<IHelmService, HelmService>();
