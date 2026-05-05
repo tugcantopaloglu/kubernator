@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -26,8 +28,11 @@ public sealed class AuthService : IDisposable
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
+    private static readonly TimeSpan SetupTicketTtl = TimeSpan.FromMinutes(10);
+
     private readonly string filePath;
     private readonly SemaphoreSlim mutex = new(1, 1);
+    private readonly ConcurrentDictionary<string, (SetupResult Result, DateTimeOffset ExpiresAt)> setupTickets = new(StringComparer.Ordinal);
     private AuthAccount? cached;
 
     public AuthService()
@@ -113,6 +118,30 @@ public sealed class AuthService : IDisposable
             mutex.Release();
         }
         return true;
+    }
+
+    public string IssueSetupTicket(SetupResult result)
+    {
+        var bytes = RandomNumberGenerator.GetBytes(24);
+        var ticket = Convert.ToHexString(bytes);
+        setupTickets[ticket] = (result, DateTimeOffset.UtcNow.Add(SetupTicketTtl));
+        return ticket;
+    }
+
+    public SetupResult? ConsumeSetupTicket(string ticket)
+    {
+        if (string.IsNullOrEmpty(ticket)) return null;
+        var now = DateTimeOffset.UtcNow;
+        foreach (var kvp in setupTickets)
+        {
+            if (kvp.Value.ExpiresAt < now)
+            {
+                setupTickets.TryRemove(kvp.Key, out _);
+            }
+        }
+        if (!setupTickets.TryRemove(ticket, out var entry)) return null;
+        if (entry.ExpiresAt < now) return null;
+        return entry.Result;
     }
 
     public void Dispose() => mutex.Dispose();

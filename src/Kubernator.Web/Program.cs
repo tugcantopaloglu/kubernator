@@ -84,12 +84,28 @@ var app = builder.Build();
 var listenHost = ParseBind(bindAddress).Host;
 var requiresToken = !string.IsNullOrEmpty(accessToken);
 var isLoopbackOnly = listenHost is "127.0.0.1" or "::1" or "localhost";
+var allowInsecureNetwork = string.Equals(builder.Configuration["allow-insecure-network"], "true", StringComparison.OrdinalIgnoreCase);
 
+if (!isLoopbackOnly && !allowInsecureNetwork)
+{
+    app.Logger.LogCritical(
+        "kubernator.web refuses to bind to non-loopback host {Host} over plain HTTP. " +
+        "the auth cookie would travel in cleartext and be capturable on the network. " +
+        "either bind to 127.0.0.1 and front this with a TLS-terminating reverse proxy, " +
+        "or pass --allow-insecure-network=true to override (not recommended).", listenHost);
+    return;
+}
+if (!isLoopbackOnly)
+{
+    app.Logger.LogWarning(
+        "kubernator.web is bound to {Host} over plain HTTP with --allow-insecure-network=true. " +
+        "the auth cookie + TOTP secret + bundle uploads travel in cleartext on this network.", listenHost);
+}
 if (!isLoopbackOnly && !requiresToken)
 {
     app.Logger.LogWarning(
-        "kubernator.web is bound to {Host} without --token; sign-in is the only barrier. " +
-        "consider passing --token <hex> as an extra layer or bind to 127.0.0.1.", listenHost);
+        "kubernator.web is bound to {Host} without --token; the cookie session is the only barrier. " +
+        "consider passing --token <hex> as an extra layer.", listenHost);
 }
 
 app.Use(async (ctx, next) =>
@@ -158,9 +174,8 @@ app.MapPost("/api/auth/setup", async (HttpRequest req, AuthService auth, IAntifo
     try
     {
         var result = await auth.SetupAsync(username, password);
-        return Results.Redirect(
-            "/auth/setup-complete?username=" + Uri.EscapeDataString(result.Account.Username)
-            + "&secret=" + Uri.EscapeDataString(result.Account.TotpSecret));
+        var ticket = auth.IssueSetupTicket(result);
+        return Results.Redirect("/auth/setup-complete?ticket=" + Uri.EscapeDataString(ticket));
     }
     catch (Exception ex)
     {
@@ -176,7 +191,7 @@ app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntifo
     var password = form["password"].ToString();
     var code = form["code"].ToString();
     var returnUrl = form["returnUrl"].ToString();
-    if (string.IsNullOrEmpty(returnUrl) || !Uri.TryCreate(returnUrl, UriKind.Relative, out _))
+    if (!IsLocalRelativeUrl(returnUrl))
     {
         returnUrl = "/";
     }
@@ -214,3 +229,13 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+static bool IsLocalRelativeUrl(string? url)
+{
+    if (string.IsNullOrEmpty(url)) return false;
+    if (url.Length == 1 && url[0] == '/') return true;
+    if (url[0] != '/') return false;
+    if (url[1] == '/' || url[1] == '\\') return false;
+    if (url.Contains(':', StringComparison.Ordinal)) return false;
+    return true;
+}

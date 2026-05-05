@@ -1,6 +1,8 @@
 @page "/auth/setup-complete"
 @layout EmptyLayout
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@inject AuthService Auth
+@inject NavigationManager Nav
 
 <PageTitle>account created · kubernator</PageTitle>
 
@@ -9,11 +11,13 @@
         <h1>save your TOTP secret</h1>
         <p class="muted">add this secret to your authenticator app (Aegis, 1Password, Authy, Google Authenticator, etc.) <strong>before</strong> you sign in. you cannot recover it later — only reset by deleting <code>~/.kubernator/auth/account.json</code>.</p>
 
-        @if (string.IsNullOrEmpty(Secret))
+        @if (claimedResult is null)
         {
             <div class="banner err">
                 <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
-                <div class="banner-body">no secret in URL — go back to <a href="/auth/setup">/auth/setup</a>.</div>
+                <div class="banner-body">
+                    setup ticket missing, expired, or already consumed. start over from <a href="/auth/setup">/auth/setup</a> if the account file does not exist yet.
+                </div>
             </div>
         }
         else
@@ -21,17 +25,22 @@
             <div class="card-grid">
                 <div class="fact-card">
                     <div class="fact-label">account</div>
-                    <div class="fact-value"><code>@Username</code></div>
+                    <div class="fact-value"><code>@claimedResult.Account.Username</code></div>
                 </div>
                 <div class="fact-card">
                     <div class="fact-label">TOTP secret (base32)</div>
-                    <div class="fact-value"><code style="word-break:break-all">@Secret</code></div>
+                    <div class="fact-value"><code style="word-break:break-all">@claimedResult.Account.TotpSecret</code></div>
                 </div>
                 <div class="fact-card">
                     <div class="fact-label">otpauth URI</div>
-                    <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@OtpAuthUri</code></div>
+                    <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@claimedResult.OtpAuthUri</code></div>
                     <div class="muted" style="font-size:var(--fs-11)">paste this into a QR generator if your app needs a QR code.</div>
                 </div>
+            </div>
+
+            <div class="banner info" style="margin-top:var(--s-3)">
+                <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+                <div class="banner-body">this page only renders the secret once — refreshing or going back loses it.</div>
             </div>
 
             <div style="margin-top:var(--s-4)">
@@ -45,10 +54,15 @@
 </div>
 
 @code {
-    [SupplyParameterFromQuery] public string? Username { get; set; }
-    [SupplyParameterFromQuery] public string? Secret { get; set; }
+    [SupplyParameterFromQuery] public string? Ticket { get; set; }
 
-    private string? OtpAuthUri => string.IsNullOrEmpty(Secret) || string.IsNullOrEmpty(Username)
-        ? null
-        : Totp.BuildOtpAuthUri("kubernator", Username!, Secret!);
+    private SetupResult? claimedResult;
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrEmpty(Ticket))
+        {
+            claimedResult = Auth.ConsumeSetupTicket(Ticket);
+        }
+    }
 }
