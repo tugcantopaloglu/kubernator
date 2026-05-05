@@ -1,8 +1,25 @@
 @page "/"
 @rendermode InteractiveServer
 @inject IServiceProvider Services
+@inject Microsoft.Extensions.Configuration.IConfiguration Config
 
 <PageTitle>kubernator</PageTitle>
+
+@{
+    var bind = Config["bind"] ?? "127.0.0.1:5050";
+    var token = Config["token"];
+    var loopback = bind.StartsWith("127.0.0.1", StringComparison.Ordinal)
+        || bind.StartsWith("localhost", StringComparison.Ordinal)
+        || bind.StartsWith("[::1]", StringComparison.Ordinal);
+}
+
+@if (!loopback && string.IsNullOrEmpty(token))
+{
+    <div class="warning-banner">
+        Bound to <code>@bind</code> with no <code>--token</code>. Anyone reachable on this port can drive the tool.
+        Restart with <code>--bind 127.0.0.1:5050</code> or pass <code>--token &lt;hex&gt;</code>.
+    </div>
+}
 
 <h1>Dashboard</h1>
 

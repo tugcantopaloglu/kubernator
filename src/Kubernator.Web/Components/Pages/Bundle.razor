@@ -4,6 +4,7 @@
 @inject IStrategySelector Strategy
 @inject IBundleService Bundles
 @inject IContainerEngineProvider EngineProvider
+@inject Kubernator.Web.Downloads.ArtifactRegistry Artifacts
 
 <PageTitle>bundle · kubernator</PageTitle>
 
@@ -60,6 +61,14 @@
     }
 </EditForm>
 
+@if (log.Count > 0)
+{
+    <section class="result">
+        <h2>progress</h2>
+        <pre class="log">@string.Join('\n', log)</pre>
+    </section>
+}
+
 @if (result is not null)
 {
     <section class="result">
@@ -68,6 +77,10 @@
                 <h3>bundle</h3>
                 <p><code>@result.BundlePath</code></p>
                 <p class="muted">size: @FormatSize(result.BundleSizeBytes)</p>
+                @if (downloadToken is not null)
+                {
+                    <a class="download-link" href="/download/@downloadToken">download .kubpack</a>
+                }
             </div>
             <div class="card">
                 <h3>sha256</h3>
@@ -113,6 +126,8 @@
     private string? error;
     private string? engineStatus;
     private bool busy;
+    private string? downloadToken;
+    private readonly List<string> log = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -138,6 +153,13 @@
         error = null;
         busy = true;
         result = null;
+        downloadToken = null;
+        log.Clear();
+        var progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
         try
         {
             var resolved = System.IO.Path.GetFullPath(form.Path);
@@ -185,7 +207,11 @@
                 KeepScratch = form.KeepScratch
             };
 
-            result = await Bundles.CreateAsync(plan, options, engine);
+            result = await Bundles.CreateAsync(plan, options, engine, progress);
+            if (result is not null && File.Exists(result.BundlePath))
+            {
+                downloadToken = Artifacts.Register(result.BundlePath, System.IO.Path.GetFileName(result.BundlePath));
+            }
         }
         catch (Exception ex)
         {
