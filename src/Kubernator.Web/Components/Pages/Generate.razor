@@ -3,6 +3,7 @@
 @inject IAnalysisService Analysis
 @inject IStrategySelector Strategy
 @inject IGenerationService Generation
+@inject Kubernator.Web.Downloads.ArtifactRegistry Artifacts
 
 <PageTitle>generate · kubernator</PageTitle>
 
@@ -55,6 +56,10 @@
 {
     <section class="result">
         <h2>generated files</h2>
+        @if (downloadToken is not null)
+        {
+            <p><a class="download-link" href="/download/@downloadToken">download .zip</a></p>
+        }
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
             {
@@ -80,6 +85,7 @@
 
     private readonly Form form = new();
     private GenerationResult? result;
+    private string? downloadToken;
     private string? error;
     private bool busy;
 
@@ -136,11 +142,13 @@
                 Replicas = form.Replicas,
                 Scaling = scaling
             });
+            downloadToken = Artifacts.RegisterDirectory(output, $"{plan.ImageName}-manifests");
         }
         catch (Exception ex)
         {
             error = ex.Message;
             result = null;
+            downloadToken = null;
         }
         finally
         {

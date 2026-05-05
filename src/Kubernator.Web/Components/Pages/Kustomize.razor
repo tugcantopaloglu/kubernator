@@ -3,6 +3,7 @@
 @inject IAnalysisService Analysis
 @inject IStrategySelector Strategy
 @inject IKustomizeService KustomizeService
+@inject Kubernator.Web.Downloads.ArtifactRegistry Artifacts
 
 <PageTitle>kustomize · kubernator</PageTitle>
 
@@ -61,6 +62,10 @@
             </div>
         </div>
 
+        @if (downloadToken is not null)
+        {
+            <p><a class="download-link" href="/download/@downloadToken">download .zip</a></p>
+        }
         <h2>files</h2>
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
@@ -87,6 +92,7 @@
     private KustomizeResult? result;
     private string? error;
     private bool busy;
+    private string? downloadToken;
 
     private async Task HandleSubmit()
     {
@@ -136,11 +142,13 @@
                 Exposure = exposure,
                 Replicas = form.Replicas
             });
+            downloadToken = Artifacts.RegisterDirectory(output, $"{plan.ImageName}-kustomize");
         }
         catch (Exception ex)
         {
             error = ex.Message;
             result = null;
+            downloadToken = null;
         }
         finally
         {

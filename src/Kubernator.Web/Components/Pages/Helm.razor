@@ -3,6 +3,7 @@
 @inject IAnalysisService Analysis
 @inject IStrategySelector Strategy
 @inject IHelmService HelmService
+@inject Kubernator.Web.Downloads.ArtifactRegistry Artifacts
 
 <PageTitle>helm · kubernator</PageTitle>
 
@@ -78,6 +79,10 @@
             }
         </div>
 
+        @if (downloadToken is not null)
+        {
+            <p><a class="download-link" href="/download/@downloadToken">download chart .zip</a></p>
+        }
         <h2>files</h2>
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
@@ -109,6 +114,7 @@
     private HelmGenerationResult? result;
     private string? error;
     private bool busy;
+    private string? downloadToken;
 
     private async Task HandleSubmit()
     {
@@ -168,11 +174,13 @@
                 Scaling = scaling,
                 Package = form.Package
             });
+            downloadToken = Artifacts.RegisterDirectory(result.ChartDirectory, $"{plan.ImageName}-helm");
         }
         catch (Exception ex)
         {
             error = ex.Message;
             result = null;
+            downloadToken = null;
         }
         finally
         {

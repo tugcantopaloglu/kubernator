@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject IAnalysisService Analysis
 @inject IPipelineService Pipelines
+@inject Kubernator.Web.Downloads.ArtifactRegistry Artifacts
 
 <PageTitle>pipeline · kubernator</PageTitle>
 
@@ -59,6 +60,10 @@
 {
     <section class="result">
         <h2>generated files</h2>
+        @if (downloadToken is not null)
+        {
+            <p><a class="download-link" href="/download/@downloadToken">download .zip</a></p>
+        }
         <ul class="file-list">
             @foreach (var f in result.WrittenFiles)
             {
@@ -86,6 +91,7 @@
     private PipelineGenerationResult? result;
     private string? error;
     private bool busy;
+    private string? downloadToken;
 
     private async Task HandleSubmit()
     {
@@ -134,11 +140,13 @@
                 : System.IO.Path.GetFullPath(form.OutputDirectory!);
 
             result = await Pipelines.GenerateAsync(target, options, output);
+            downloadToken = Artifacts.RegisterDirectory(output, $"{options.ImageName}-pipeline-{form.Target}");
         }
         catch (Exception ex)
         {
             error = ex.Message;
             result = null;
+            downloadToken = null;
         }
         finally
         {
