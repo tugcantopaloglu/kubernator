@@ -20,6 +20,7 @@ using Kubernator.Core.Generation;
 using Kubernator.Core.GitOps;
 using Kubernator.Core.Helm;
 using Kubernator.Core.Kustomize;
+using Kubernator.Core.Monitoring;
 using Kubernator.Core.Packaging;
 using Kubernator.Core.Packaging.Signing;
 using Kubernator.Core.Pipelines;
@@ -72,6 +73,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IProcessRunner, ProcessRunner>();
         services.TryAddSingleton<IValidator, KindValidator>();
         services.TryAddSingleton<Deployment.IClusterApplier, Deployment.KubectlClusterApplier>();
+        services.TryAddSingleton<IClusterMonitor, KubectlClusterMonitor>();
         services.TryAddSingleton<IDiagnosticsService, DiagnosticsService>();
         services.AddHttpClient<IUpdateService, UpdateService>();
 

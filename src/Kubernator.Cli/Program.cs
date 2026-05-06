@@ -118,6 +118,12 @@ app.Configure(config =>
         .WithExample("deploy", "./publish", "--context", "prod-eu", "--allow-production")
         .WithExample("deploy", "--list-contexts");
 
+    config.AddCommand<MonitorCommand>("monitor")
+        .WithDescription("Snapshot or watch cluster state: node health, pods, ingress, network policies, and live metrics.")
+        .WithExample("monitor")
+        .WithExample("monitor", "--context", "prod-eu", "--namespace", "shop")
+        .WithExample("monitor", "--watch", "5", "--no-netpol");
+
     config.AddCommand<AuditCommand>("audit")
         .WithDescription("Audit a manifests directory against the kubernator secure baseline (AUD codes).")
         .WithExample("audit", "./publish/.kubernator/kubernetes")

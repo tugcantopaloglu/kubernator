@@ -1,0 +1,427 @@
+@page "/monitor"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IClusterMonitor ClusterMonitor
+@inject Kubernator.Core.Deployment.IClusterApplier Applier
+
+<PageTitle>monitor · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">verify</span>cluster monitor</h1>
+    <p class="subtitle">live snapshot of node health, pods, ingress, network policies and live consumption.</p>
+</div>
+
+<div class="form-grid cols-3" style="margin-bottom:var(--s-3)">
+    <div class="form-row">
+        <label for="m-context">context</label>
+        <InputSelect id="m-context" @bind-Value="contextName">
+            <option value="">(current)</option>
+            @foreach (var c in contexts)
+            {
+                <option value="@c.Name">@c.Name@(c.IsCurrent ? " *" : "")</option>
+            }
+        </InputSelect>
+    </div>
+    <div class="form-row">
+        <label for="m-ns">namespace</label>
+        <InputText id="m-ns" @bind-Value="namespaceFilter" placeholder="(all)" />
+    </div>
+    <div class="form-row">
+        <label for="m-watch">refresh (seconds, 0 = off)</label>
+        <InputNumber id="m-watch" @bind-Value="refreshSeconds" class="input-w-sm" />
+    </div>
+</div>
+
+<div class="row" style="gap:8px; margin-bottom:var(--s-3)">
+    <button class="btn btn-primary" type="button" @onclick="RefreshOnce" disabled="@busy">
+        @if (busy)
+        {
+            <span class="spinner"></span>
+        }
+        else
+        {
+            <svg class="ico" width="14" height="14"><use href="#i-update" /></svg>
+        }
+        <span>@(busy ? "refreshing…" : "refresh")</span>
+    </button>
+    <label class="check"><InputCheckbox @bind-Value="includeMetrics" /> metrics-server</label>
+    <label class="check"><InputCheckbox @bind-Value="includePods" /> pods</label>
+    <label class="check"><InputCheckbox @bind-Value="includeIngress" /> ingress</label>
+    <label class="check"><InputCheckbox @bind-Value="includeNetPol" /> netpol</label>
+    <label class="check"><InputCheckbox @bind-Value="includeServices" /> services</label>
+</div>
+
+@if (error is not null)
+{
+    <div class="banner err">
+        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+        <div class="banner-body"><span class="label">error</span>@error</div>
+    </div>
+}
+
+@if (snapshot is not null)
+{
+    <div class="card-grid">
+        <div class="fact-card">
+            <div class="fact-label">context</div>
+            <div class="fact-value"><code>@snapshot.Context</code></div>
+            @if (snapshot.ApiVersion is not null)
+            {
+                <div class="muted" style="font-size:var(--fs-11)">apiserver @snapshot.ApiVersion</div>
+            }
+        </div>
+        <div class="fact-card">
+            <div class="fact-label">nodes</div>
+            <div class="fact-value">
+                @{ var allReady = snapshot.Nodes.Count > 0 && snapshot.ReadyNodes == snapshot.Nodes.Count; }
+                <span class="@(allReady ? "ok" : "warn")">@snapshot.ReadyNodes / @snapshot.Nodes.Count ready</span>
+            </div>
+        </div>
+        <div class="fact-card">
+            <div class="fact-label">pods</div>
+            <div class="fact-value">@snapshot.RunningPods running, @snapshot.FailedPods failed</div>
+            <div class="muted" style="font-size:var(--fs-11)">of @snapshot.Pods.Count total</div>
+        </div>
+        <div class="fact-card">
+            <div class="fact-label">metrics-server</div>
+            <div class="fact-value">
+                @if (snapshot.MetricsServerAvailable)
+                {
+                    <span class="ok">available</span>
+                }
+                else
+                {
+                    <span class="warn">unavailable</span>
+                }
+            </div>
+        </div>
+        <div class="fact-card">
+            <div class="fact-label">captured</div>
+            <div class="fact-value">@snapshot.CapturedAt.ToString("HH:mm:ss")</div>
+            <div class="muted" style="font-size:var(--fs-11)">@(refreshSeconds > 0 ? $"auto-refresh {refreshSeconds}s" : "manual")</div>
+        </div>
+    </div>
+
+    @if (snapshot.Nodes.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>nodes</h2></div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>node</th><th>status</th><th>roles</th><th>kubelet</th><th>os</th><th>cpu/mem (alloc)</th><th>cpu/mem (use)</th><th>age</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var n in snapshot.Nodes.OrderBy(x => x.Name))
+                        {
+                            <tr>
+                                <td><code>@n.Name</code></td>
+                                <td><span class="@(n.Status == "Ready" ? "ok" : "fail")">@n.Status</span></td>
+                                <td>@string.Join(", ", n.Roles)</td>
+                                <td><code>@n.KubeletVersion</code></td>
+                                <td>@n.OsImage</td>
+                                <td>@n.Allocatable.Cpu / @n.Allocatable.Memory</td>
+                                <td>@(n.Usage is null ? "—" : $"{n.Usage.Cpu} / {n.Usage.Memory}")</td>
+                                <td>@FormatAge(n.Age)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (snapshot.Pods.Count > 0)
+    {
+        var troubled = snapshot.Pods
+            .Where(p => p.Phase != "Running" && p.Phase != "Succeeded")
+            .OrderBy(p => p.Namespace).ThenBy(p => p.Name)
+            .ToList();
+        if (troubled.Count > 0)
+        {
+            <div class="section">
+                <div class="section-head"><h2>troubled pods (@troubled.Count)</h2></div>
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead>
+                            <tr><th>namespace</th><th>pod</th><th>phase</th><th>ready</th><th>restarts</th><th>node</th><th>age</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in troubled.Take(50))
+                            {
+                                <tr>
+                                    <td>@p.Namespace</td>
+                                    <td><code>@p.Name</code></td>
+                                    <td><span class="@(p.Phase == "Failed" || p.Phase == "Unknown" ? "fail" : "warn")">@p.Phase</span></td>
+                                    <td>@p.ContainersReady / @p.ContainersTotal</td>
+                                    <td>@p.Restarts</td>
+                                    <td>@p.NodeName</td>
+                                    <td>@FormatAge(p.Age)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+
+        if (snapshot.MetricsServerAvailable)
+        {
+            var topPods = snapshot.Pods
+                .Where(p => p.Usage is not null)
+                .OrderByDescending(p => ParseCpu(p.Usage!.Cpu))
+                .Take(15)
+                .ToList();
+            if (topPods.Count > 0)
+            {
+                <div class="section">
+                    <div class="section-head"><h2>top pods by cpu (@topPods.Count)</h2></div>
+                    <div class="table-wrap">
+                        <table class="data">
+                            <thead>
+                                <tr><th>namespace</th><th>pod</th><th>cpu</th><th>memory</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in topPods)
+                                {
+                                    <tr>
+                                        <td>@p.Namespace</td>
+                                        <td><code>@p.Name</code></td>
+                                        <td>@p.Usage!.Cpu</td>
+                                        <td>@p.Usage!.Memory</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        }
+    }
+
+    @if (snapshot.Ingresses.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>ingresses (@snapshot.Ingresses.Count)</h2></div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>namespace</th><th>ingress</th><th>class</th><th>hosts</th><th>addresses</th><th>tls</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var ing in snapshot.Ingresses.OrderBy(x => x.Namespace).ThenBy(x => x.Name))
+                        {
+                            <tr>
+                                <td>@ing.Namespace</td>
+                                <td><code>@ing.Name</code></td>
+                                <td>@(string.IsNullOrEmpty(ing.IngressClass) ? "<default>" : ing.IngressClass)</td>
+                                <td>@string.Join(", ", ing.Hosts)</td>
+                                <td>@(ing.Addresses.Count == 0 ? "—" : string.Join(", ", ing.Addresses))</td>
+                                <td>@(ing.TlsHosts.Count > 0 ? "✓" : "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (snapshot.NetworkPolicies.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>network policies (@snapshot.NetworkPolicies.Count)</h2></div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>namespace</th><th>policy</th><th>types</th><th>age</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in snapshot.NetworkPolicies.OrderBy(x => x.Namespace).ThenBy(x => x.Name))
+                        {
+                            <tr>
+                                <td>@p.Namespace</td>
+                                <td><code>@p.Name</code></td>
+                                <td>@string.Join(",", p.PolicyTypes)</td>
+                                <td>@FormatAge(p.Age)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (snapshot.Services.Count > 0)
+    {
+        <div class="section">
+            <div class="section-head"><h2>services (@snapshot.Services.Count)</h2></div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>namespace</th><th>service</th><th>type</th><th>cluster ip</th><th>ports</th><th>age</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in snapshot.Services.OrderBy(x => x.Namespace).ThenBy(x => x.Name).Take(80))
+                        {
+                            <tr>
+                                <td>@s.Namespace</td>
+                                <td><code>@s.Name</code></td>
+                                <td>@s.Type</td>
+                                <td>@s.ClusterIp</td>
+                                <td>@string.Join(", ", s.Ports)</td>
+                                <td>@FormatAge(s.Age)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (snapshot.Warnings.Count > 0)
+    {
+        <div class="banner warn" style="margin-top:var(--s-5)">
+            <svg class="ico" width="16" height="16"><use href="#i-warn" /></svg>
+            <div class="banner-body">
+                <span class="label">warnings</span>
+                <ul style="margin:0; padding-left:var(--s-5)">
+                    @foreach (var w in snapshot.Warnings)
+                    {
+                        <li>@w</li>
+                    }
+                </ul>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string contextName = string.Empty;
+    private string namespaceFilter = string.Empty;
+    private int refreshSeconds = 10;
+    private bool includeMetrics = true;
+    private bool includePods = true;
+    private bool includeIngress = true;
+    private bool includeNetPol = true;
+    private bool includeServices = true;
+
+    private ClusterSnapshot? snapshot;
+    private string? error;
+    private bool busy;
+    private List<Kubernator.Core.Deployment.ClusterContext> contexts = new();
+    private CancellationTokenSource? loopCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var list = await Applier.ListContextsAsync();
+            contexts = list.ToList();
+            var current = contexts.FirstOrDefault(c => c.IsCurrent);
+            if (current is not null)
+            {
+                contextName = current.Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            error = $"could not list contexts: {ex.Message}";
+        }
+        await RefreshOnce();
+        StartLoopIfNeeded();
+    }
+
+    private async Task RefreshOnce()
+    {
+        if (busy) return;
+        busy = true;
+        error = null;
+        try
+        {
+            var ctx = string.IsNullOrWhiteSpace(contextName)
+                ? (contexts.FirstOrDefault(c => c.IsCurrent)?.Name ?? "")
+                : contextName;
+            if (string.IsNullOrEmpty(ctx))
+            {
+                error = "no kubectl context available";
+                return;
+            }
+
+            snapshot = await ClusterMonitor.GetSnapshotAsync(new ClusterMonitorOptions
+            {
+                Context = ctx,
+                Namespace = string.IsNullOrWhiteSpace(namespaceFilter) ? null : namespaceFilter,
+                IncludeMetrics = includeMetrics,
+                IncludePods = includePods,
+                IncludeIngress = includeIngress,
+                IncludeNetworkPolicies = includeNetPol,
+                IncludeServices = includeServices
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private void StartLoopIfNeeded()
+    {
+        loopCts?.Cancel();
+        loopCts = null;
+        if (refreshSeconds <= 0) return;
+        loopCts = new CancellationTokenSource();
+        var token = loopCts.Token;
+        var seconds = Math.Max(2, refreshSeconds);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(seconds), token);
+                    await InvokeAsync(async () =>
+                    {
+                        await RefreshOnce();
+                        StateHasChanged();
+                    });
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }, token);
+    }
+
+    public void Dispose()
+    {
+        loopCts?.Cancel();
+        loopCts?.Dispose();
+    }
+
+    private static double ParseCpu(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return 0;
+        if (raw.EndsWith("m", StringComparison.Ordinal))
+        {
+            return double.TryParse(raw[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var m) ? m : 0;
+        }
+        if (raw.EndsWith("n", StringComparison.Ordinal))
+        {
+            return double.TryParse(raw[..^1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var n) ? n / 1_000_000 : 0;
+        }
+        return double.TryParse(raw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v * 1000 : 0;
+    }
+
+    private static string FormatAge(TimeSpan age)
+    {
+        if (age.TotalSeconds < 0) return "—";
+        if (age.TotalDays >= 1) return $"{(int)age.TotalDays}d";
+        if (age.TotalHours >= 1) return $"{(int)age.TotalHours}h";
+        if (age.TotalMinutes >= 1) return $"{(int)age.TotalMinutes}m";
+        return $"{(int)age.TotalSeconds}s";
+    }
+}
