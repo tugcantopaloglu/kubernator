@@ -3,6 +3,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @inject AuthService Auth
 @inject NavigationManager Nav
+@using QRCoder
 
 <PageTitle>account created · kubernator</PageTitle>
 
@@ -39,17 +40,24 @@
         {
             <div class="card-grid">
                 <div class="fact-card">
+                    <div class="fact-label">scan with authenticator</div>
+                    <div class="fact-value" style="display:flex; justify-content:center; padding:var(--s-3) 0">
+                        @((MarkupString)qrSvg!)
+                    </div>
+                    <div class="muted" style="font-size:var(--fs-11); text-align:center">point your authenticator app's camera at this code</div>
+                </div>
+                <div class="fact-card">
                     <div class="fact-label">account</div>
                     <div class="fact-value"><code>@peeked.Account.Username</code></div>
                 </div>
                 <div class="fact-card">
                     <div class="fact-label">TOTP secret (base32)</div>
                     <div class="fact-value"><code style="word-break:break-all">@peeked.Account.TotpSecret</code></div>
+                    <div class="muted" style="font-size:var(--fs-11)">enter this manually if you cannot scan the QR code.</div>
                 </div>
                 <div class="fact-card">
                     <div class="fact-label">otpauth URI</div>
                     <div class="fact-value"><code style="word-break:break-all; font-size:var(--fs-11)">@peeked.OtpAuthUri</code></div>
-                    <div class="muted" style="font-size:var(--fs-11)">paste into a QR generator if your app needs a QR code.</div>
                 </div>
             </div>
 
@@ -94,6 +102,7 @@
 
     private SetupResult? peeked;
     private bool verified;
+    private string? qrSvg;
 
     protected override void OnInitialized()
     {
@@ -109,6 +118,18 @@
         if (!string.IsNullOrEmpty(Ticket))
         {
             peeked = Auth.PeekSetupTicket(Ticket);
+            if (peeked is not null)
+            {
+                qrSvg = BuildQrSvg(peeked.OtpAuthUri);
+            }
         }
+    }
+
+    private static string BuildQrSvg(string payload)
+    {
+        using var generator = new QRCodeGenerator();
+        using var data = generator.CreateQrCode(payload, QRCodeGenerator.ECCLevel.M);
+        var svg = new SvgQRCode(data);
+        return svg.GetGraphic(4, "#0a0a0a", "#ffffff", drawQuietZones: true);
     }
 }

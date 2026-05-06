@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubernator-web
+  namespace: kubernator
+  labels:
+    app.kubernetes.io/name: kubernator-web
+    app.kubernetes.io/part-of: kubernator
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kubernator-web
+  ports:
+    - name: http
+      port: 80
+      protocol: TCP
+      targetPort: http

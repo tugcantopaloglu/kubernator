@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   publish:
@@ -114,9 +115,118 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  image:
+    name: container image
+    runs-on: ubuntu-latest
+    outputs:
+      image_ref: ${{ steps.push.outputs.image_ref }}
+      image_digest: ${{ steps.push.outputs.image_digest }}
+      base_digest: ${{ steps.base.outputs.base_digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve version
+        id: ver
+        shell: bash
+        run: |
+          if [ -n "${GITHUB_REF_NAME:-}" ] && [[ "$GITHUB_REF_NAME" == v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to ghcr
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: resolve base image digests
+        id: base
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_REF="mcr.microsoft.com/dotnet/sdk:10.0"
+          ASPNET_REF="mcr.microsoft.com/dotnet/aspnet:10.0-noble-chiseled"
+          SDK_DIGEST=$(docker buildx imagetools inspect "$SDK_REF" --format '{{ .Manifest.Digest }}')
+          ASPNET_DIGEST=$(docker buildx imagetools inspect "$ASPNET_REF" --format '{{ .Manifest.Digest }}')
+          SDK_PINNED="mcr.microsoft.com/dotnet/sdk@${SDK_DIGEST}"
+          ASPNET_PINNED="mcr.microsoft.com/dotnet/aspnet@${ASPNET_DIGEST}"
+          echo "sdk_pinned=$SDK_PINNED" >> "$GITHUB_OUTPUT"
+          echo "aspnet_pinned=$ASPNET_PINNED" >> "$GITHUB_OUTPUT"
+          echo "base_digest=${ASPNET_DIGEST}" >> "$GITHUB_OUTPUT"
+          echo "resolved sdk    -> $SDK_PINNED"
+          echo "resolved aspnet -> $ASPNET_PINNED"
+
+      - name: image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/kubernator-web
+          tags: |
+            type=raw,value=${{ steps.ver.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: build and push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Kubernator.Web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          sbom: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            SDK_IMAGE=${{ steps.base.outputs.sdk_pinned }}
+            ASPNET_IMAGE=${{ steps.base.outputs.aspnet_pinned }}
+            VERSION=${{ steps.ver.outputs.version }}
+
+      - name: emit image ref
+        id: emit
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_REF="ghcr.io/${{ github.repository_owner }}/kubernator-web:${{ steps.ver.outputs.version }}"
+          DIGEST="${{ steps.push.outputs.digest }}"
+          echo "image_ref=$IMAGE_REF" >> "$GITHUB_OUTPUT"
+          echo "image_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Published $IMAGE_REF@$DIGEST"
+
+      - name: write image metadata artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p image-meta
+          cat > image-meta/image.json <<EOF
+          {
+            "ref": "ghcr.io/${{ github.repository_owner }}/kubernator-web:${{ steps.ver.outputs.version }}",
+            "digest": "${{ steps.push.outputs.digest }}",
+            "platforms": ["linux/amd64", "linux/arm64"],
+            "baseImageDigest": "${{ steps.base.outputs.base_digest }}"
+          }
+          EOF
+          cat image-meta/image.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kubernator-image
+          path: image-meta/image.json
+          if-no-files-found: error
+          retention-days: 7
+
   release:
     name: release
-    needs: publish
+    needs: [publish, image]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -157,12 +267,18 @@ jobs:
           done
           ARTS="$ARTS]"
 
+          IMAGE_BLOCK="null"
+          if [ -f dist/image.json ]; then
+            IMAGE_BLOCK=$(cat dist/image.json)
+          fi
+
           cat > release.json <<EOF
           {
             "version": "$VERSION",
             "publishedAt": "$PUBLISHED",
             "notes": "kubernator $VERSION",
-            "artifacts": $ARTS
+            "artifacts": $ARTS,
+            "image": $IMAGE_BLOCK
           }
           EOF
           jq . release.json

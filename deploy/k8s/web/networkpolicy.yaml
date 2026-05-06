@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernator-web-default-deny
+  namespace: kubernator
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernator-web-allow-http
+  namespace: kubernator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kubernator-web
+  policyTypes: ["Ingress"]
+  ingress:
+    - ports:
+        - port: 5050
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kubernator-web-allow-dns
+  namespace: kubernator
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kubernator-web
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP

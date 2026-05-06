@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="QRCoder" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Kubernator.Core\Kubernator.Core.csproj" />
     <ProjectReference Include="..\Kubernator.Runtime\Kubernator.Runtime.csproj" />
   </ItemGroup>

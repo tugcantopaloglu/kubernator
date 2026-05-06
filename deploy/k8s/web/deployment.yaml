@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubernator-web
+  namespace: kubernator
+  labels:
+    app.kubernetes.io/name: kubernator-web
+    app.kubernetes.io/part-of: kubernator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubernator-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubernator-web
+        app.kubernetes.io/part-of: kubernator
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        fsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: ghcr.io/tugcantopaloglu/kubernator-web:0.2.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --bind=0.0.0.0:5050
+            - --allow-insecure-network=true
+          env:
+            - name: KUBERNATOR_HOME
+              value: /var/lib/kubernator
+            - name: ASPNETCORE_HTTP_PORTS
+              value: "5050"
+            - name: DOTNET_EnableDiagnostics
+              value: "0"
+            - name: KUBERNATOR_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubernator-web-kek
+                  key: kek
+                  optional: true
+          ports:
+            - name: http
+              containerPort: 5050
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /auth/login
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /auth/login
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1654
+            runAsGroup: 1654
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: auth
+              mountPath: /var/lib/kubernator
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: auth
+          persistentVolumeClaim:
+            claimName: kubernator-web-auth
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
