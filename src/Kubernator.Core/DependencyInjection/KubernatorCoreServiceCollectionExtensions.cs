@@ -1,4 +1,5 @@
 using Kubernator.Core.Abstractions;
+using Kubernator.Core.AirGapped;
 using Kubernator.Core.Analysis;
 using Kubernator.Core.Audit;
 using Kubernator.Core.Analysis.DotNet;
@@ -56,6 +57,7 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IStrategySelector, StrategySelector>();
         services.TryAddSingleton<IGenerationService, GenerationService>();
         services.TryAddSingleton<IBundleService, BundleService>();
+        services.TryAddSingleton<IImageBundleService, ImageBundleService>();
         services.TryAddSingleton<IKeyVault>(_ => FileKeyVault.Default());
         services.TryAddSingleton<ManifestAuditor>();
         services.TryAddSingleton<InstallScriptAuditor>();

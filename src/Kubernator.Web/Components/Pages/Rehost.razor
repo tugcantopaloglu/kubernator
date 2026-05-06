@@ -1,0 +1,242 @@
+@page "/rehost"
+@rendermode InteractiveServer
+@inject IImageBundleService Bundles
+@inject IContainerEngineProvider EngineProvider
+
+<PageTitle>rehost · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>rehost</h1>
+    <p class="subtitle">on an air-gapped host: load image tarballs, retag for a private registry, push, and rewrite manifest <code>image:</code> references in place.</p>
+</div>
+
+@if (engineStatus is not null)
+{
+    <div class="banner info">
+        <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+        <div class="banner-body"><span class="label">engine</span>@engineStatus</div>
+    </div>
+}
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+
+    <div class="section-head"><h2>source</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="r-bundle">bundle directory</label>
+            <InputText id="r-bundle" @bind-Value="form.Bundle" placeholder="./images" />
+            <span class="hint">directory produced by <code>kubernator pull</code> — must contain <code>images.manifest.json</code>.</span>
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>target registry</h2></div>
+    <div class="form-grid cols-3">
+        <div class="form-row span-2">
+            <label for="r-registry">host</label>
+            <InputText id="r-registry" @bind-Value="form.Registry" placeholder="registry.airgap.local:5000" />
+        </div>
+        <div class="form-row">
+            <label for="r-ns">namespace<span class="opt">  optional</span></label>
+            <InputText id="r-ns" @bind-Value="form.RegistryNamespace" placeholder="infra/mirror" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>manifests</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="r-manifests">manifests directory<span class="opt">  optional</span></label>
+            <InputText id="r-manifests" @bind-Value="form.ManifestsDirectory" placeholder="./k8s" />
+            <span class="hint">all <code>image:</code> references that point at a source image will be rewritten to the new registry.</span>
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.NoLoad" /> skip docker load (assume images already in cache)</label>
+        <label class="check"><InputCheckbox @bind-Value="form.NoRewrite" /> do not rewrite manifest files</label>
+    </div>
+
+    <div class="row" style="margin-top:8px; gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg>
+            }
+            <span>@(busy ? "rehosting…" : "rehost")</span>
+        </button>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator rehost --bundle … --registry …</code></span>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
+
+@if (log.Count > 0)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result?.Ok == true)
+            {
+                <span class="pill ok"><span class="dot"></span>done</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
+}
+
+@if (result is not null)
+{
+    <div class="section">
+        <div class="section-head"><h2>pushed images</h2></div>
+        <ul class="file-list">
+            @foreach (var p in result.Pushed)
+            {
+                <li>
+                    <svg class="ico" width="14" height="14"><use href="#i-disk" /></svg>
+                    <span class="path"><code>@p.SourceReference</code> → <code>@p.TargetReference</code></span>
+                </li>
+            }
+        </ul>
+
+        @if (result.RewrittenManifestFiles.Count > 0)
+        {
+            <div class="section-head" style="margin-top:var(--s-5)"><h2>rewritten manifests</h2></div>
+            <ul class="file-list">
+                @foreach (var f in result.RewrittenManifestFiles)
+                {
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-file" /></svg>
+                        <span class="path"><code>@f</code></span>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (result.Errors.Count > 0)
+        {
+            <div class="banner err" style="margin-top:var(--s-5)">
+                <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+                <div class="banner-body">
+                    <span class="label">errors</span>
+                    <ul style="margin:0; padding-left:var(--s-5)">
+                        @foreach (var e in result.Errors)
+                        {
+                            <li>@e</li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Bundle { get; set; } = string.Empty;
+        public string Registry { get; set; } = string.Empty;
+        public string? RegistryNamespace { get; set; }
+        public string? ManifestsDirectory { get; set; }
+        public bool NoLoad { get; set; }
+        public bool NoRewrite { get; set; }
+    }
+
+    private readonly Form form = new();
+    private ImageRehostResult? result;
+    private string? error;
+    private string? engineStatus;
+    private bool busy;
+    private readonly List<string> log = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var engine = await EngineProvider.ResolveAsync();
+            var info = await engine.GetInfoAsync();
+            engineStatus = $"{info.Name} {info.Version} ({info.OperatingSystem}/{info.Architecture})";
+        }
+        catch (Exception ex)
+        {
+            engineStatus = $"unavailable — {ex.Message}";
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(form.Bundle))
+        {
+            error = "bundle directory is required";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(form.Registry))
+        {
+            error = "registry host is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        log.Clear();
+
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            var bundle = System.IO.Path.GetFullPath(form.Bundle);
+            var manifestsDir = string.IsNullOrWhiteSpace(form.ManifestsDirectory)
+                ? null
+                : System.IO.Path.GetFullPath(form.ManifestsDirectory!);
+
+            var engine = await EngineProvider.ResolveAsync();
+            var options = new ImageRehostOptions
+            {
+                BundleDirectory = bundle,
+                TargetRegistry = form.Registry,
+                TargetNamespace = form.RegistryNamespace,
+                LoadBeforePush = !form.NoLoad,
+                RewriteManifestImages = !form.NoRewrite,
+                ManifestsDirectory = manifestsDir
+            };
+            result = await Bundles.RehostAsync(options, engine, progress);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+}

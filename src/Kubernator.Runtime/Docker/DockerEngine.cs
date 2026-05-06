@@ -125,6 +125,101 @@ public sealed class DockerEngine : IContainerEngine, IDisposable
         await stream.CopyToAsync(output, ct);
     }
 
+    public async IAsyncEnumerable<string> PullImageAsync(string reference, string? platform = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var parsed = ParseReference(reference);
+        var parameters = new ImagesCreateParameters
+        {
+            FromImage = parsed.Repository,
+            Tag = parsed.Tag,
+            Platform = platform
+        };
+
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<string>();
+        var progress = new ChannelProgress(channel.Writer);
+
+        var pullTask = Task.Run(async () =>
+        {
+            try
+            {
+                await client.Images.CreateImageAsync(parameters, authConfig: null, progress, ct);
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, ct);
+
+        await foreach (var line in channel.Reader.ReadAllAsync(ct))
+        {
+            yield return line;
+        }
+        await pullTask;
+    }
+
+    public async Task LoadImageAsync(string tarPath, CancellationToken ct = default)
+    {
+        if (!File.Exists(tarPath))
+        {
+            throw new FileNotFoundException(tarPath);
+        }
+        await using var stream = File.OpenRead(tarPath);
+        await client.Images.LoadImageAsync(new ImageLoadParameters { Quiet = false }, stream, progress: null, ct);
+    }
+
+    public async Task TagImageAsync(string sourceReference, string targetReference, CancellationToken ct = default)
+    {
+        var parsed = ParseReference(targetReference);
+        await client.Images.TagImageAsync(sourceReference, new ImageTagParameters
+        {
+            RepositoryName = parsed.Repository,
+            Tag = parsed.Tag,
+            Force = true
+        }, ct);
+    }
+
+    public async IAsyncEnumerable<string> PushImageAsync(string reference, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var parsed = ParseReference(reference);
+        var parameters = new ImagePushParameters { Tag = parsed.Tag };
+
+        var channel = System.Threading.Channels.Channel.CreateUnbounded<string>();
+        var progress = new ChannelProgress(channel.Writer);
+
+        var pushTask = Task.Run(async () =>
+        {
+            try
+            {
+                await client.Images.PushImageAsync(parsed.Repository, parameters, authConfig: null, progress, ct);
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, ct);
+
+        await foreach (var line in channel.Reader.ReadAllAsync(ct))
+        {
+            yield return line;
+        }
+        await pushTask;
+    }
+
+    private static (string Repository, string Tag) ParseReference(string reference)
+    {
+        var atIdx = reference.IndexOf('@', StringComparison.Ordinal);
+        var trimmed = atIdx >= 0 ? reference[..atIdx] : reference;
+        var slashIdx = trimmed.LastIndexOf('/');
+        var afterSlash = slashIdx >= 0 ? trimmed[(slashIdx + 1)..] : trimmed;
+        var colonInAfterSlash = afterSlash.IndexOf(':', StringComparison.Ordinal);
+        if (colonInAfterSlash < 0)
+        {
+            return (trimmed, "latest");
+        }
+        var lastColon = trimmed.Length - afterSlash.Length + colonInAfterSlash;
+        return (trimmed[..lastColon], trimmed[(lastColon + 1)..]);
+    }
+
     public void Dispose()
     {
         client.Dispose();

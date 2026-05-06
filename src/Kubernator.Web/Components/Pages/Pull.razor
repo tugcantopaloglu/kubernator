@@ -1,0 +1,223 @@
+@page "/pull"
+@rendermode InteractiveServer
+@inject IImageBundleService Bundles
+@inject IContainerEngineProvider EngineProvider
+
+<PageTitle>pull · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>pull images</h1>
+    <p class="subtitle">download container images and save them as <code>.tar</code> files for transfer into air-gapped environments.</p>
+</div>
+
+@if (engineStatus is not null)
+{
+    <div class="banner info">
+        <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+        <div class="banner-body"><span class="label">engine</span>@engineStatus</div>
+    </div>
+}
+
+<EditForm Model="@form" OnValidSubmit="@HandleSubmit" class="form">
+
+    <div class="section-head"><h2>images</h2></div>
+    <div class="form-grid">
+        <div class="form-row span-2">
+            <label for="p-images">references<span class="opt">  one per line</span></label>
+            <InputTextArea id="p-images" @bind-Value="form.Images" rows="6" placeholder="nginx:1.27&#10;redis:7.4&#10;ghcr.io/example/app:v1.0.0" />
+            <span class="hint">supports any registry; references like <code>ghcr.io/owner/repo:tag</code> or <code>docker.io/library/nginx@sha256:...</code> are valid.</span>
+        </div>
+        <div class="form-row">
+            <label for="p-out">output directory</label>
+            <InputText id="p-out" @bind-Value="form.OutputDirectory" placeholder="(default: ./images)" />
+        </div>
+        <div class="form-row">
+            <label for="p-platform">platform<span class="opt">  optional</span></label>
+            <InputText id="p-platform" @bind-Value="form.Platform" placeholder="linux/amd64" />
+        </div>
+    </div>
+
+    <div class="div-h"></div>
+
+    <div class="section-head"><h2>options</h2></div>
+    <div class="row wrap" style="gap:16px">
+        <label class="check"><InputCheckbox @bind-Value="form.ForcePull" /> force pull (re-pull even if locally cached)</label>
+        <label class="check"><InputCheckbox @bind-Value="form.Combined" /> compress into a single <code>.tar.gz</code></label>
+    </div>
+
+    <div class="row" style="margin-top:8px; gap:8px">
+        <button class="btn btn-primary" type="submit" disabled="@busy">
+            @if (busy)
+            {
+                <span class="spinner"></span>
+            }
+            else
+            {
+                <svg class="ico" width="14" height="14"><use href="#i-download" /></svg>
+            }
+            <span>@(busy ? "pulling…" : "pull")</span>
+        </button>
+        <span class="spacer"></span>
+        <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator pull &lt;img&gt;...</code></span>
+    </div>
+
+    @if (error is not null)
+    {
+        <div class="banner err">
+            <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+            <div class="banner-body"><span class="label">error</span>@error</div>
+        </div>
+    }
+</EditForm>
+
+@if (log.Count > 0)
+{
+    <div class="section">
+        <div class="section-head">
+            <h2>progress</h2>
+            @if (busy)
+            {
+                <span class="pill run"><span class="dot"></span>running</span>
+            }
+            else if (result is not null)
+            {
+                <span class="pill ok"><span class="dot"></span>done</span>
+            }
+            else
+            {
+                <span class="pill fail"><span class="dot"></span>failed</span>
+            }
+            <span class="meta">@log.Count line(s)</span>
+        </div>
+        <div class="log" aria-live="polite">@string.Join('\n', log)</div>
+    </div>
+}
+
+@if (result is not null)
+{
+    <div class="section">
+        <div class="section-head"><h2>result</h2></div>
+        <div class="card-grid">
+            <div class="fact-card">
+                <div class="fact-label">output</div>
+                <div class="fact-value"><code>@result.OutputDirectory</code></div>
+            </div>
+            <div class="fact-card">
+                <div class="fact-label">manifest</div>
+                <div class="fact-value"><code>@System.IO.Path.GetFileName(result.ManifestPath)</code></div>
+                <div class="muted" style="font-size:var(--fs-11)">@result.Manifest.Images.Count image(s)</div>
+            </div>
+            @if (result.CombinedArchivePath is not null)
+            {
+                <div class="fact-card">
+                    <div class="fact-label">combined archive</div>
+                    <div class="fact-value"><code>@System.IO.Path.GetFileName(result.CombinedArchivePath)</code></div>
+                </div>
+            }
+        </div>
+
+        @if (result.Manifest.Images.Count > 0)
+        {
+            <div class="section-head" style="margin-top:var(--s-5)"><h2>images</h2></div>
+            <ul class="file-list">
+                @foreach (var img in result.Manifest.Images)
+                {
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-disk" /></svg>
+                        <span class="path"><code>@img.Reference</code></span>
+                        <span class="size">@FormatSize(img.SizeBytes)</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    private sealed class Form
+    {
+        public string Images { get; set; } = string.Empty;
+        public string? OutputDirectory { get; set; }
+        public string? Platform { get; set; }
+        public bool ForcePull { get; set; }
+        public bool Combined { get; set; }
+    }
+
+    private readonly Form form = new();
+    private ImageBundleResult? result;
+    private string? error;
+    private string? engineStatus;
+    private bool busy;
+    private readonly List<string> log = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var engine = await EngineProvider.ResolveAsync();
+            var info = await engine.GetInfoAsync();
+            engineStatus = $"{info.Name} {info.Version} ({info.OperatingSystem}/{info.Architecture})";
+        }
+        catch (Exception ex)
+        {
+            engineStatus = $"unavailable — {ex.Message}";
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        var refs = form.Images
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToArray();
+        if (refs.Length == 0)
+        {
+            error = "at least one image reference is required";
+            return;
+        }
+        error = null;
+        busy = true;
+        result = null;
+        log.Clear();
+
+        IProgress<string> progress = new Progress<string>(msg =>
+        {
+            log.Add($"{DateTimeOffset.UtcNow:HH:mm:ss}  {msg}");
+            InvokeAsync(StateHasChanged);
+        });
+        try
+        {
+            var output = string.IsNullOrWhiteSpace(form.OutputDirectory)
+                ? System.IO.Path.Combine(Environment.CurrentDirectory, "images")
+                : System.IO.Path.GetFullPath(form.OutputDirectory!);
+
+            var engine = await EngineProvider.ResolveAsync();
+            var options = new ImageBundleOptions
+            {
+                References = refs,
+                OutputDirectory = output,
+                Platform = string.IsNullOrWhiteSpace(form.Platform) ? null : form.Platform,
+                ForcePull = form.ForcePull,
+                CombineIntoSingleArchive = form.Combined
+            };
+            result = await Bundles.PullAsync(options, engine, progress);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            result = null;
+        }
+        finally
+        {
+            busy = false;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+        if (bytes >= 1024L * 1024) return $"{bytes / 1024.0 / 1024:F2} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F2} KB";
+        return $"{bytes} B";
+    }
+}

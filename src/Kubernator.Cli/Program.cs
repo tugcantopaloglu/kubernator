@@ -45,6 +45,16 @@ app.Configure(config =>
         .WithExample("bundle", "./publish", "-o", "./out/myapp.kubpack")
         .WithExample("bundle", "./publish", "--namespace", "prod", "--replicas", "3");
 
+    config.AddCommand<PullCommand>("pull")
+        .WithDescription("Pull container images from a registry and save them as transferable .tar files for offline use.")
+        .WithExample("pull", "nginx:1.27", "-o", "./images")
+        .WithExample("pull", "nginx:1.27", "redis:7.4", "--combined", "-o", "./images");
+
+    config.AddCommand<RehostCommand>("rehost")
+        .WithDescription("On an air-gapped host, load images from a bundle, retag them under a private registry, push, and rewrite manifest image refs.")
+        .WithExample("rehost", "--bundle", "./images", "--registry", "registry.airgap.local:5000")
+        .WithExample("rehost", "--bundle", "./images", "--registry", "registry.airgap.local:5000", "--namespace", "infra/mirror", "--manifests", "./k8s");
+
     config.AddCommand<VerifyCommand>("verify")
         .WithDescription("Verify the integrity (and optional cosign signature) of a .kubpack bundle.")
         .WithExample("verify", "./out/myapp.kubpack")

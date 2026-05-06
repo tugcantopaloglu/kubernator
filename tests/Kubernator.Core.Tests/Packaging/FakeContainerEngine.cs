@@ -74,4 +74,37 @@ internal sealed class FakeContainerEngine : IContainerEngine
         var bytes = System.Text.Encoding.UTF8.GetBytes($"fake-image-tar:{reference}:{platform}");
         await File.WriteAllBytesAsync(outputTarPath, bytes, ct);
     }
+
+    public List<(string Reference, string? Platform)> Pulled { get; } = [];
+    public List<string> Loaded { get; } = [];
+    public List<(string Source, string Target)> Tagged { get; } = [];
+    public List<string> Pushed { get; } = [];
+
+    public async IAsyncEnumerable<string> PullImageAsync(string reference, string? platform = null, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        Pulled.Add((reference, platform));
+        Register(reference);
+        yield return $"pulled {reference}";
+        await Task.CompletedTask;
+    }
+
+    public Task LoadImageAsync(string tarPath, CancellationToken ct = default)
+    {
+        Loaded.Add(tarPath);
+        return Task.CompletedTask;
+    }
+
+    public Task TagImageAsync(string sourceReference, string targetReference, CancellationToken ct = default)
+    {
+        Tagged.Add((sourceReference, targetReference));
+        Register(targetReference);
+        return Task.CompletedTask;
+    }
+
+    public async IAsyncEnumerable<string> PushImageAsync(string reference, [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        Pushed.Add(reference);
+        yield return $"pushed {reference}";
+        await Task.CompletedTask;
+    }
 }

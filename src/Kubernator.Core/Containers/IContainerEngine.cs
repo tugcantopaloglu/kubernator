@@ -44,6 +44,18 @@ public interface IContainerEngine
     Task SaveImageAsync(string reference, string platform, string outputTarPath, CancellationToken ct = default)
         => SaveImageAsync(reference, outputTarPath, ct);
 
+    IAsyncEnumerable<string> PullImageAsync(string reference, string? platform = null, CancellationToken ct = default)
+        => throw new NotSupportedException($"engine '{Kind}' does not support image pull");
+
+    Task LoadImageAsync(string tarPath, CancellationToken ct = default)
+        => throw new NotSupportedException($"engine '{Kind}' does not support image load");
+
+    Task TagImageAsync(string sourceReference, string targetReference, CancellationToken ct = default)
+        => throw new NotSupportedException($"engine '{Kind}' does not support image tag");
+
+    IAsyncEnumerable<string> PushImageAsync(string reference, CancellationToken ct = default)
+        => throw new NotSupportedException($"engine '{Kind}' does not support image push");
+
     bool SupportsMultiPlatform => false;
 }
 
