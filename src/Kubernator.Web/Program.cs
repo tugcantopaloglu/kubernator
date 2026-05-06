@@ -23,6 +23,8 @@ builder.Services.AddSingleton<ArtifactRegistry>();
 builder.Services.AddScoped<BuildPipeline>();
 builder.Services.AddSingleton<AuthService>();
 
+var trustProxyHeaders = string.Equals(builder.Configuration["trust-proxy-headers"], "true", StringComparison.OrdinalIgnoreCase);
+
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -31,9 +33,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         options.LogoutPath = "/api/auth/logout";
         options.Cookie.HttpOnly = true;
         options.Cookie.SameSite = SameSiteMode.Strict;
-        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.SecurePolicy = trustProxyHeaders
+            ? CookieSecurePolicy.Always
+            : CookieSecurePolicy.SameAsRequest;
         options.Cookie.Name = "kubernator.auth";
-        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.ExpireTimeSpan = KubernatorAuthDefaults.SessionLifetime;
         options.SlidingExpiration = true;
     });
 
@@ -47,6 +51,18 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddAntiforgery();
 builder.Services.AddHttpContextAccessor();
+
+if (trustProxyHeaders)
+{
+    builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(options =>
+    {
+        options.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+            | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+            | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+        options.KnownIPNetworks.Clear();
+        options.KnownProxies.Clear();
+    });
+}
 
 var bindAddress = builder.Configuration["bind"] ?? "127.0.0.1:5050";
 var accessToken = builder.Configuration["token"];
@@ -85,26 +101,38 @@ var requiresToken = !string.IsNullOrEmpty(accessToken);
 var isLoopbackOnly = listenHost is "127.0.0.1" or "::1" or "localhost";
 var allowInsecureNetwork = string.Equals(builder.Configuration["allow-insecure-network"], "true", StringComparison.OrdinalIgnoreCase);
 
-if (!isLoopbackOnly && !allowInsecureNetwork)
+if (!isLoopbackOnly && !allowInsecureNetwork && !trustProxyHeaders)
 {
     app.Logger.LogCritical(
         "kubernator.web refuses to bind to non-loopback host {Host} over plain HTTP. " +
         "the auth cookie would travel in cleartext and be capturable on the network. " +
         "either bind to 127.0.0.1 and front this with a TLS-terminating reverse proxy, " +
+        "pass --trust-proxy-headers=true if a TLS-terminating proxy in front sets X-Forwarded-Proto, " +
         "or pass --allow-insecure-network=true to override (not recommended).", listenHost);
     return;
 }
-if (!isLoopbackOnly)
+if (!isLoopbackOnly && !trustProxyHeaders)
 {
     app.Logger.LogWarning(
         "kubernator.web is bound to {Host} over plain HTTP with --allow-insecure-network=true. " +
         "the auth cookie + TOTP secret + bundle uploads travel in cleartext on this network.", listenHost);
+}
+if (trustProxyHeaders)
+{
+    app.Logger.LogInformation(
+        "kubernator.web trusts X-Forwarded-* headers from the upstream proxy and enforces Secure cookies. " +
+        "ensure only your reverse proxy can reach this host on the network.");
 }
 if (!isLoopbackOnly && !requiresToken)
 {
     app.Logger.LogWarning(
         "kubernator.web is bound to {Host} without --token; the cookie session is the only barrier. " +
         "consider passing --token <hex> as an extra layer.", listenHost);
+}
+
+if (trustProxyHeaders)
+{
+    app.UseForwardedHeaders();
 }
 
 app.Use(async (ctx, next) =>
@@ -225,7 +253,13 @@ app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntifo
     };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     var principal = new ClaimsPrincipal(identity);
-    await req.HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
+    var authProps = new AuthenticationProperties
+    {
+        IsPersistent = false,
+        IssuedUtc = DateTimeOffset.UtcNow,
+        ExpiresUtc = DateTimeOffset.UtcNow.Add(KubernatorAuthDefaults.SessionLifetime)
+    };
+    await req.HttpContext.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal, authProps);
     return Results.Redirect(returnUrl);
 }).AllowAnonymous();
 
@@ -264,4 +298,9 @@ static bool IsLocalRelativeUrl(string? url)
     if (url[1] == '/' || url[1] == '\\') return false;
     if (url.Contains(':', StringComparison.Ordinal)) return false;
     return true;
+}
+
+internal static class KubernatorAuthDefaults
+{
+    public static readonly TimeSpan SessionLifetime = TimeSpan.FromHours(8);
 }

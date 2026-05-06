@@ -24,4 +24,8 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kubernator.Cli.Tests" />
+  </ItemGroup>
+
 </Project>

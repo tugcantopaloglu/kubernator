@@ -272,8 +272,8 @@ jobs:
           ARTS="$ARTS]"
 
           IMAGE_BLOCK="null"
-          if [ -f dist/image.json ]; then
-            IMAGE_BLOCK=$(cat dist/image.json)
+          if [ -f dist/image-meta/image.json ]; then
+            IMAGE_BLOCK=$(cat dist/image-meta/image.json)
           fi
 
           cat > release.json <<EOF
