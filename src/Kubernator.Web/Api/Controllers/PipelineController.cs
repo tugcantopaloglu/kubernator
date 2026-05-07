@@ -2,7 +2,9 @@ using Kubernator.Core.Abstractions;
 using Kubernator.Core.Pipelines;
 using Kubernator.Core.Strategy;
 using Kubernator.Core.Updates;
+using Kubernator.Web.Auth;
 using Kubernator.Web.Downloads;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -11,6 +13,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/pipeline")]
 [Produces("application/json")]
 [Tags("Generation")]
+[Authorize(Policy = ApiKeyScopes.GeneratePolicy)]
 public sealed class PipelineController : ControllerBase
 {
     private readonly IAnalysisService analysis;

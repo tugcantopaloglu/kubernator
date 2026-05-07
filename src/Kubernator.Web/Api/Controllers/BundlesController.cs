@@ -1,4 +1,6 @@
 using Kubernator.Core.Packaging;
+using Kubernator.Web.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -7,6 +9,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/bundles")]
 [Produces("application/json")]
 [Tags("Bundles")]
+[Authorize(Policy = ApiKeyScopes.ReadPolicy)]
 public sealed class BundlesController : ControllerBase
 {
     private readonly IBundleService bundles;

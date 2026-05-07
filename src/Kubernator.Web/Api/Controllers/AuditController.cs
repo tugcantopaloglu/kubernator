@@ -1,4 +1,6 @@
 using Kubernator.Core.Audit;
+using Kubernator.Web.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -7,6 +9,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/audit")]
 [Produces("application/json")]
 [Tags("Inspection")]
+[Authorize(Policy = ApiKeyScopes.ReadPolicy)]
 public sealed class AuditController : ControllerBase
 {
     private readonly ManifestAuditor auditor;

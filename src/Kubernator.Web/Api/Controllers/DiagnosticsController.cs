@@ -1,4 +1,6 @@
 using Kubernator.Core.Diagnostics;
+using Kubernator.Web.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -7,6 +9,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/diagnostics")]
 [Produces("application/json")]
 [Tags("System")]
+[Authorize(Policy = ApiKeyScopes.ReadPolicy)]
 public sealed class DiagnosticsController : ControllerBase
 {
     private readonly IDiagnosticsService diagnostics;

@@ -3,13 +3,23 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Kubernator.Web.Api;
+using Kubernator.Web.Auth;
+using Kubernator.Web.Logging;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace Kubernator.Web.Tests.Api;
 
-public sealed class ApiTests : IClassFixture<ApiTests.Factory>
+[CollectionDefinition("api-suite")]
+#pragma warning disable CA1711
+public sealed class ApiTestCollectionDefinition : ICollectionFixture<ApiTests.Factory> { }
+#pragma warning restore CA1711
+
+[Collection("api-suite")]
+public sealed class ApiTests
 {
     private readonly Factory factory;
 
@@ -476,6 +486,15 @@ public sealed class ApiTests : IClassFixture<ApiTests.Factory>
             Environment.SetEnvironmentVariable("KUBERNATOR_API_KEY", TestApiKey);
             Directory.CreateDirectory(Home);
             return base.CreateHost(builder);
+        }
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.ConfigureTestServices(services =>
+            {
+                services.AddSingleton<AuditLog>(_ => new AuditLog(Path.Combine(Home, "audit")));
+                services.AddSingleton<IApiKeyStore>(_ => new SqliteApiKeyStore(Path.Combine(Home, "auth", "api_keys.db")));
+            });
         }
 
         protected override void Dispose(bool disposing)

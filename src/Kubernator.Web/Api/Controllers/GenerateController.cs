@@ -1,7 +1,9 @@
 using Kubernator.Core.Abstractions;
 using Kubernator.Core.Generation;
 using Kubernator.Core.Strategy;
+using Kubernator.Web.Auth;
 using Kubernator.Web.Downloads;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -10,6 +12,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/generate")]
 [Produces("application/json")]
 [Tags("Generation")]
+[Authorize(Policy = ApiKeyScopes.GeneratePolicy)]
 public sealed class GenerateController : ControllerBase
 {
     private readonly IAnalysisService analysis;

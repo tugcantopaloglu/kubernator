@@ -1,4 +1,6 @@
 using Kubernator.Core.Vulnerabilities;
+using Kubernator.Web.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -7,6 +9,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/vulndb")]
 [Produces("application/json")]
 [Tags("Security")]
+[Authorize(Policy = ApiKeyScopes.ReadPolicy)]
 public sealed class VulnDbController : ControllerBase
 {
     private readonly IVulnerabilityDatabase database;

@@ -1,4 +1,6 @@
 using Kubernator.Core.Abstractions;
+using Kubernator.Web.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -7,6 +9,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/analyze")]
 [Produces("application/json")]
 [Tags("Inspection")]
+[Authorize(Policy = ApiKeyScopes.ReadPolicy)]
 public sealed class AnalyzeController : ControllerBase
 {
     private readonly IAnalysisService analysis;

@@ -3,10 +3,12 @@ using System.Security.Cryptography;
 using Kubernator.Core.DependencyInjection;
 using Kubernator.Core.Updates;
 using Kubernator.Runtime.DependencyInjection;
+using System.Threading.RateLimiting;
 using Kubernator.Web.Api;
 using Kubernator.Web.Auth;
 using Kubernator.Web.Components;
 using Kubernator.Web.Downloads;
+using Kubernator.Web.Jobs;
 using Kubernator.Web.Logging;
 using Kubernator.Web.Services;
 using Microsoft.AspNetCore.Antiforgery;
@@ -14,6 +16,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Events;
@@ -71,10 +74,16 @@ try
     builder.Services.AddSingleton<ArtifactRegistry>();
     builder.Services.AddScoped<BuildPipeline>();
     builder.Services.AddSingleton<AuthService>();
+    builder.Services.AddSingleton<IApiKeyStore, SqliteApiKeyStore>();
+    builder.Services.AddSingleton<AuditLog>();
+    builder.Services.AddSingleton<InMemoryJobManager>();
+    builder.Services.AddSingleton<IJobManager>(sp => sp.GetRequiredService<InMemoryJobManager>());
+    builder.Services.AddHostedService<JobBackgroundRunner>();
+    builder.Services.AddSingleton<IAuthorizationHandler, ScopeRequirementHandler>();
 
     var trustProxyHeaders = string.Equals(builder.Configuration["trust-proxy-headers"], "true", StringComparison.OrdinalIgnoreCase);
-    var apiKey = builder.Configuration["api-key"] ?? Environment.GetEnvironmentVariable("KUBERNATOR_API_KEY");
-    var apiKeyOptions = new ApiKeyOptions { ApiKey = apiKey };
+    var bootstrapKey = builder.Configuration["api-key"] ?? Environment.GetEnvironmentVariable("KUBERNATOR_API_KEY");
+    var apiKeyOptions = new ApiKeyOptions { BootstrapKey = bootstrapKey };
     builder.Services.AddSingleton(apiKeyOptions);
 
     builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -94,16 +103,73 @@ try
         })
         .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
             ApiKeyOptions.SchemeName,
-            options => { options.ApiKey = apiKey; });
+            options => { options.BootstrapKey = bootstrapKey; });
 
     builder.Services.AddAuthorization(options =>
     {
         options.FallbackPolicy = new AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser()
             .Build();
-        options.AddPolicy(ApiKeyOptions.PolicyName, policy => policy
+        options.AddPolicy(ApiKeyScopes.ReadPolicy, policy => policy
             .AddAuthenticationSchemes(ApiKeyOptions.SchemeName)
-            .RequireAuthenticatedUser());
+            .RequireAuthenticatedUser()
+            .Requirements.Add(new ScopeRequirement(ApiKeyScope.Read)));
+        options.AddPolicy(ApiKeyScopes.GeneratePolicy, policy => policy
+            .AddAuthenticationSchemes(ApiKeyOptions.SchemeName)
+            .RequireAuthenticatedUser()
+            .Requirements.Add(new ScopeRequirement(ApiKeyScope.Generate)));
+        options.AddPolicy(ApiKeyScopes.AdminPolicy, policy => policy
+            .AddAuthenticationSchemes(ApiKeyOptions.SchemeName)
+            .RequireAuthenticatedUser()
+            .Requirements.Add(new ScopeRequirement(ApiKeyScope.Admin)));
+    });
+
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+        {
+            if (!ctx.Request.Path.StartsWithSegments("/api/v1"))
+            {
+                return RateLimitPartition.GetNoLimiter("__none");
+            }
+            var keyId = ctx.User.FindFirst(ApiKeyScopes.KeyIdClaimType)?.Value;
+            var partitionKey = keyId ?? ("ip:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown"));
+            var perMinute = SqliteApiKeyStore.DefaultRateLimitPerMinute;
+            if (keyId is { Length: > 0 } && keyId != "bootstrap")
+            {
+                var store = ctx.RequestServices.GetService<IApiKeyStore>();
+                if (store is not null)
+                {
+                    var record = store.GetAsync(keyId, ctx.RequestAborted).GetAwaiter().GetResult();
+                    if (record is not null)
+                    {
+                        perMinute = record.RateLimitPerMinute;
+                    }
+                }
+            }
+            return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+            {
+                AutoReplenishment = true,
+                PermitLimit = perMinute,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            });
+        });
+        options.OnRejected = async (ctx, ct) =>
+        {
+            ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            ctx.HttpContext.Response.ContentType = "application/problem+json";
+            var problem = new ApiProblem
+            {
+                Type = "https://kubernator/errors/rate-limit",
+                Title = "rate limit exceeded",
+                Status = StatusCodes.Status429TooManyRequests,
+                Detail = "too many requests; reduce traffic or request a higher per-key limit",
+                Instance = ctx.HttpContext.Request.Path,
+                TraceId = System.Diagnostics.Activity.Current?.Id ?? ctx.HttpContext.TraceIdentifier
+            };
+            await System.Text.Json.JsonSerializer.SerializeAsync(ctx.HttpContext.Response.Body, problem, cancellationToken: ct);
+        };
     });
 
     builder.Services.AddCascadingAuthenticationState();
@@ -328,21 +394,18 @@ try
     }
 
     app.UseWhen(ctx => ctx.Request.Path.StartsWithSegments("/api/v1"),
-        branch => branch.UseApiExceptionHandler());
+        branch =>
+        {
+            branch.UseApiExceptionHandler();
+            branch.UseAuditLog();
+        });
 
     app.UseAuthentication();
     app.UseAuthorization();
     app.UseAntiforgery();
+    app.UseRateLimiter();
 
-    var apiGroup = app.MapControllers();
-    if (apiKeyOptions.IsConfigured)
-    {
-        apiGroup.RequireAuthorization(ApiKeyOptions.PolicyName);
-    }
-    else
-    {
-        apiGroup.AllowAnonymous();
-    }
+    app.MapControllers();
 
     app.MapGet("/download/{token}", [Authorize] (string token, ArtifactRegistry registry) =>
     {

@@ -4,9 +4,8 @@ public sealed class ApiKeyOptions
 {
     public const string HeaderName = "X-Api-Key";
     public const string SchemeName = "ApiKey";
-    public const string PolicyName = "ApiKey";
 
-    public string? ApiKey { get; init; }
+    public string? BootstrapKey { get; init; }
 
-    public bool IsConfigured => !string.IsNullOrEmpty(ApiKey);
+    public bool IsConfigured => !string.IsNullOrEmpty(BootstrapKey);
 }

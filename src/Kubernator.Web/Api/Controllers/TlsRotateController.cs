@@ -1,5 +1,7 @@
 using Kubernator.Core.Tls.Rotation;
+using Kubernator.Web.Auth;
 using Kubernator.Web.Downloads;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Kubernator.Web.Api.Controllers;
@@ -8,6 +10,7 @@ namespace Kubernator.Web.Api.Controllers;
 [Route("api/v1/tls-rotate")]
 [Produces("application/json")]
 [Tags("Generation")]
+[Authorize(Policy = ApiKeyScopes.GeneratePolicy)]
 public sealed class TlsRotateController : ControllerBase
 {
     private readonly ITlsRotationService rotation;
