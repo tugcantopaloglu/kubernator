@@ -5,13 +5,35 @@ using Kubernator.Core.Updates;
 using Kubernator.Runtime.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Serilog;
+using Serilog.Events;
 using Spectre.Console.Cli;
+
+var logHome = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
+    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kubernator");
+var logDir = Path.Combine(logHome, "logs");
+Directory.CreateDirectory(logDir);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .Enrich.FromLogContext()
+    .WriteTo.File(
+        new Serilog.Formatting.Compact.CompactJsonFormatter(),
+        Path.Combine(logDir, "kubernator.cli-.log"),
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        fileSizeLimitBytes: 25_000_000,
+        rollOnFileSizeLimit: true,
+        shared: true)
+    .CreateLogger();
+
+AppDomain.CurrentDomain.ProcessExit += (_, _) => Log.CloseAndFlush();
 
 var services = new ServiceCollection();
 services.AddLogging(b =>
 {
-    b.SetMinimumLevel(LogLevel.Warning);
+    b.SetMinimumLevel(LogLevel.Information);
     b.AddProvider(new SpectreLoggerProvider());
+    b.AddSerilog(Log.Logger, dispose: false);
 });
 services.AddKubernatorCore();
 services.AddKubernatorRuntime();
