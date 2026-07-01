@@ -93,6 +93,7 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
                 VaultEntryKind.PrivateKey => ".key",
                 VaultEntryKind.PublicKey => ".pub",
                 VaultEntryKind.Certificate => ".crt",
+                VaultEntryKind.SshPrivateKey => ".key",
                 _ => ".bin"
             };
             var fileName = $"{id}{ext}";

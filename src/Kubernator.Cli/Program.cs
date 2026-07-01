@@ -151,6 +151,14 @@ app.Configure(config =>
         .WithExample("audit", "./publish/.kubernator/kubernetes")
         .WithExample("audit", "./publish/.kubernator/kubernetes", "--namespace", "shop", "--fail-on", "warning");
 
+    config.AddCommand<ClusterCommand>("cluster")
+        .WithDescription("Pull offline RKE2 artifacts and provision or upgrade an air-gapped HA Kubernetes cluster over SSH or locally.")
+        .WithExample("cluster", "pull", "--version", "v1.30.4+rke2r1", "--arch", "amd64", "-o", "./bundles/rke2-v1.30.4")
+        .WithExample("cluster", "trust-host", "--host", "10.0.0.11", "--user", "root")
+        .WithExample("cluster", "install", "--topology", "./topology.json")
+        .WithExample("cluster", "upgrade", "--topology", "./topology.json", "--to-version", "v1.30.5+rke2r1")
+        .WithExample("cluster", "status", "--topology", "./topology.json");
+
     config.AddCommand<VaultCommand>("vault")
         .WithDescription("Manage the local key & cert vault (list / import / remove).")
         .WithExample("vault", "list")

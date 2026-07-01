@@ -8,6 +8,14 @@ using Kubernator.Core.Analysis.Java;
 using Kubernator.Core.Analysis.Node;
 using Kubernator.Core.Analysis.Python;
 using Kubernator.Core.Analysis.Static;
+using Kubernator.Core.ClusterProvisioning;
+using Kubernator.Core.ClusterProvisioning.Artifacts;
+using Kubernator.Core.ClusterProvisioning.Distros;
+using Kubernator.Core.ClusterProvisioning.Distros.K3s;
+using Kubernator.Core.ClusterProvisioning.Distros.Rke2;
+using Kubernator.Core.ClusterProvisioning.Os;
+using Kubernator.Core.ClusterProvisioning.Ssh;
+using Kubernator.Core.ClusterProvisioning.Upgrade;
 using Kubernator.Core.Detection;
 using Kubernator.Core.Detection.DotNet;
 using Kubernator.Core.Detection.Go;
@@ -76,6 +84,15 @@ public static class KubernatorCoreServiceCollectionExtensions
         services.TryAddSingleton<IClusterMonitor, KubectlClusterMonitor>();
         services.TryAddSingleton<IDiagnosticsService, DiagnosticsService>();
         services.AddHttpClient<IUpdateService, UpdateService>();
+
+        services.TryAddSingleton<SshNodeExecutor>();
+        services.TryAddSingleton<INodeExecutor, NodeExecutor>();
+        services.TryAddSingleton<IOsDetector, OsDetector>();
+        services.AddTransient<IClusterDistroProvisioner, Rke2DistroProvisioner>();
+        services.AddTransient<IClusterDistroProvisioner, K3sDistroProvisioner>();
+        services.AddHttpClient<IClusterArtifactBundleService, ClusterArtifactBundleService>();
+        services.TryAddSingleton<ClusterUpgradePlanner>();
+        services.TryAddSingleton<IClusterProvisioningService, ClusterProvisioningService>();
 
         return services;
     }

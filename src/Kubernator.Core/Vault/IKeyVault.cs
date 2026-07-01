@@ -4,7 +4,8 @@ public enum VaultEntryKind
 {
     PrivateKey,
     PublicKey,
-    Certificate
+    Certificate,
+    SshPrivateKey
 }
 
 public sealed record VaultEntry

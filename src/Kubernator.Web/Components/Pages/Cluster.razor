@@ -1,0 +1,477 @@
+@page "/cluster"
+@rendermode InteractiveServer
+@using Kubernator.Core.ClusterProvisioning
+@using Kubernator.Core.ClusterProvisioning.Artifacts
+@using Kubernator.Core.ClusterProvisioning.Distros
+@using Kubernator.Core.ClusterProvisioning.Ssh
+@using Kubernator.Core.ClusterProvisioning.Topology
+@using Kubernator.Core.ClusterProvisioning.Upgrade
+@inject IClusterArtifactBundleService Artifacts
+@inject IClusterProvisioningService Provisioning
+@inject ClusterUpgradePlanner Planner
+
+<PageTitle>cluster · kubernator</PageTitle>
+
+<div class="page-header">
+    <h1><span class="crumb">package &amp; ship</span>cluster</h1>
+    <p class="subtitle">provision or upgrade an air-gapped RKE2 Kubernetes cluster (HA control plane + workers) over SSH or locally.</p>
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>1. pull offline artifacts</h2></div>
+    <EditForm Model="@pullForm" OnValidSubmit="@HandlePull" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row">
+                <label for="cl-distro">distro</label>
+                <InputSelect id="cl-distro" @bind-Value="pullForm.Distro">
+                    <option value="@DistroKind.Rke2">rke2</option>
+                    <option value="@DistroKind.K3s">k3s</option>
+                </InputSelect>
+            </div>
+            <div class="form-row">
+                <label for="cl-version">version</label>
+                <InputText id="cl-version" @bind-Value="pullForm.Version" placeholder="v1.30.4+rke2r1" />
+            </div>
+            <div class="form-row">
+                <label for="cl-arch">architectures<span class="opt">  comma separated</span></label>
+                <InputText id="cl-arch" @bind-Value="pullForm.Arch" placeholder="amd64" />
+            </div>
+            <div class="form-row span-2">
+                <label for="cl-out">output directory</label>
+                <InputText id="cl-out" @bind-Value="pullForm.OutputDirectory" placeholder="./bundles/rke2-v1.30.4" />
+            </div>
+        </div>
+        <div class="row wrap" style="gap:16px; margin-top:var(--s-3)">
+            <label class="check"><InputCheckbox @bind-Value="pullForm.Kubectl" /> include kubectl</label>
+            <label class="check"><InputCheckbox @bind-Value="pullForm.Helm" /> include helm</label>
+            <label class="check"><InputCheckbox @bind-Value="pullForm.K9s" /> include k9s</label>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@pullBusy">
+                @if (pullBusy) { <span class="spinner"></span> } else { <svg class="ico" width="14" height="14"><use href="#i-download" /></svg> }
+                <span>@(pullBusy ? "pulling…" : "pull")</span>
+            </button>
+            <span class="spacer"></span>
+            <span class="muted" style="font-size:12px">runs the equivalent of <code>kubernator cluster pull</code></span>
+        </div>
+        @if (pullError is not null)
+        {
+            <div class="banner err"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body"><span class="label">error</span>@pullError</div></div>
+        }
+    </EditForm>
+    @if (pullLog.Count > 0)
+    {
+        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', pullLog)</div>
+    }
+    @if (pullManifest is not null)
+    {
+        <div class="table-wrap" style="margin-top:var(--s-3)">
+            <table class="t">
+                <thead><tr><th>kind</th><th>arch</th><th>path</th><th class="num">size</th></tr></thead>
+                <tbody>
+                    @foreach (var entry in pullManifest.Entries)
+                    {
+                        <tr><td><code>@entry.Kind</code></td><td>@(entry.Arch ?? "-")</td><td><code>@entry.RelativePath</code></td><td class="num">@FormatSize(entry.SizeBytes)</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>2. trust a host</h2></div>
+    <EditForm Model="@trustForm" OnValidSubmit="@HandleTrustProbe" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row"><label for="cl-host">host</label><InputText id="cl-host" @bind-Value="trustForm.Host" placeholder="10.0.0.11" /></div>
+            <div class="form-row"><label for="cl-port">port</label><InputNumber id="cl-port" @bind-Value="trustForm.Port" /></div>
+            <div class="form-row"><label for="cl-user">ssh user</label><InputText id="cl-user" @bind-Value="trustForm.Username" placeholder="root" /></div>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn" type="submit" disabled="@trustBusy">@(trustBusy ? "checking…" : "check fingerprint")</button>
+            @if (trustFingerprint is not null)
+            {
+                <button class="btn btn-primary" type="button" @onclick="HandleTrustConfirm">trust this host</button>
+            }
+        </div>
+        @if (trustFingerprint is not null)
+        {
+            <div class="banner info" style="margin-top:var(--s-3)">
+                <svg class="ico" width="16" height="16"><use href="#i-info" /></svg>
+                <div class="banner-body"><span class="label">fingerprint</span><code>@trustFingerprint</code> — verify this out-of-band before trusting</div>
+            </div>
+        }
+        @if (trustError is not null)
+        {
+            <div class="banner err"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body"><span class="label">error</span>@trustError</div></div>
+        }
+        @if (trustSaved)
+        {
+            <div class="banner ok"><svg class="ico" width="16" height="16"><use href="#i-check2" /></svg><div class="banner-body">host trusted and saved to <code>known_hosts.json</code></div></div>
+        }
+    </EditForm>
+</div>
+
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>3. install</h2></div>
+    <EditForm Model="@installForm" OnValidSubmit="@HandleInstall" class="form">
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="cl-install-topo">topology JSON path</label>
+                <InputText id="cl-install-topo" @bind-Value="installForm.TopologyPath" placeholder="./topology.json" />
+            </div>
+        </div>
+        <div class="row wrap" style="gap:16px; margin-top:var(--s-3)">
+            <label class="check"><InputCheckbox @bind-Value="installForm.AllowProduction" /> allow production-looking cluster names</label>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@installBusy">
+                @if (installBusy) { <span class="spinner"></span> }
+                <span>@(installBusy ? "installing…" : "install cluster")</span>
+            </button>
+            <span class="spacer"></span>
+            <span class="muted" style="font-size:12px">HA master(s) + workers, one click — this can take several minutes</span>
+        </div>
+    </EditForm>
+    @if (installLog.Count > 0)
+    {
+        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', installLog)</div>
+    }
+    @if (installResult is not null)
+    {
+        <div class="banner @(installResult.Ok ? "ok" : "err")" style="margin-top:var(--s-3)">
+            <svg class="ico" width="16" height="16"><use href="#@(installResult.Ok ? "i-check2" : "i-x")" /></svg>
+            <div class="banner-body">@(installResult.Ok ? "cluster installed" : string.Join("; ", installResult.Errors))</div>
+        </div>
+    }
+</div>
+
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>4. upgrade</h2></div>
+    <EditForm Model="@upgradeForm" OnValidSubmit="@HandleUpgrade" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row span-2">
+                <label for="cl-up-topo">topology JSON path</label>
+                <InputText id="cl-up-topo" @bind-Value="upgradeForm.TopologyPath" placeholder="./topology.json" />
+            </div>
+            <div class="form-row">
+                <label for="cl-up-ver">target version</label>
+                <InputText id="cl-up-ver" @bind-Value="upgradeForm.ToVersion" placeholder="v1.30.5+rke2r1" />
+            </div>
+        </div>
+        <div class="row wrap" style="gap:16px; margin-top:var(--s-3)">
+            <label class="check"><InputCheckbox @bind-Value="upgradeForm.AllowProduction" /> allow production-looking cluster names</label>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@upgradeBusy">
+                @if (upgradeBusy) { <span class="spinner"></span> }
+                <span>@(upgradeBusy ? "upgrading…" : "upgrade cluster")</span>
+            </button>
+            <span class="spacer"></span>
+            <span class="muted" style="font-size:12px">auto-detects each node's installed version and skips nodes already current</span>
+        </div>
+    </EditForm>
+    @if (upgradeLog.Count > 0)
+    {
+        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', upgradeLog)</div>
+    }
+    @if (upgradeResult is not null)
+    {
+        <div class="card-grid" style="margin-top:var(--s-3)">
+            <div class="fact-card"><div class="fact-label">upgraded</div><div class="fact-value">@upgradeResult.UpgradedNodes.Count</div></div>
+            <div class="fact-card"><div class="fact-label">already current</div><div class="fact-value">@upgradeResult.SkippedNodes.Count</div></div>
+            <div class="fact-card"><div class="fact-label">errors</div><div class="fact-value">@upgradeResult.Errors.Count</div></div>
+        </div>
+    }
+</div>
+
+<div class="div-h"></div>
+
+<div class="section">
+    <div class="section-head"><h2>5. status</h2></div>
+    <EditForm Model="@statusForm" OnValidSubmit="@HandleStatus" class="form">
+        <div class="form-grid">
+            <div class="form-row span-2">
+                <label for="cl-status-topo">topology JSON path</label>
+                <InputText id="cl-status-topo" @bind-Value="statusForm.TopologyPath" placeholder="./topology.json" />
+            </div>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn" type="submit" disabled="@statusBusy">@(statusBusy ? "checking…" : "check status")</button>
+        </div>
+        @if (statusError is not null)
+        {
+            <div class="banner err"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body"><span class="label">error</span>@statusError</div></div>
+        }
+    </EditForm>
+    @if (statusValidation is not null)
+    {
+        @foreach (var warning in statusValidation.Warnings)
+        {
+            <div class="banner info" style="margin-top:var(--s-2)"><div class="banner-body">@warning</div></div>
+        }
+        @foreach (var e in statusValidation.Errors)
+        {
+            <div class="banner err" style="margin-top:var(--s-2)"><div class="banner-body">@e</div></div>
+        }
+    }
+    @if (statusPlan is not null)
+    {
+        <div class="table-wrap" style="margin-top:var(--s-3)">
+            <table class="t">
+                <thead><tr><th>node</th><th>role</th><th>os</th><th>current</th><th>target</th><th>status</th></tr></thead>
+                <tbody>
+                    @foreach (var step in statusPlan.Steps)
+                    {
+                        <tr>
+                            <td><code>@step.Node.Name</code></td>
+                            <td>@step.Node.Role.ToString().ToLowerInvariant()</td>
+                            <td>@step.Os.DistroId @step.Os.VersionId (@step.Os.Arch)</td>
+                            <td>@(step.CurrentVersion ?? "(not installed)")</td>
+                            <td>@step.TargetVersion</td>
+                            <td>
+                                @if (step.NeedsUpgrade) { <span class="pill run"><span class="dot"></span>upgrade needed</span> }
+                                else { <span class="pill ok"><span class="dot"></span>up to date</span> }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private sealed class PullForm
+    {
+        public DistroKind Distro { get; set; } = DistroKind.Rke2;
+        public string Version { get; set; } = string.Empty;
+        public string Arch { get; set; } = "amd64";
+        public string? OutputDirectory { get; set; }
+        public bool Kubectl { get; set; } = true;
+        public bool Helm { get; set; }
+        public bool K9s { get; set; }
+    }
+
+    private sealed class TrustForm
+    {
+        public string Host { get; set; } = string.Empty;
+        public int Port { get; set; } = 22;
+        public string Username { get; set; } = "root";
+    }
+
+    private sealed class TopologyForm
+    {
+        public string TopologyPath { get; set; } = string.Empty;
+        public bool AllowProduction { get; set; }
+    }
+
+    private sealed class UpgradeForm
+    {
+        public string TopologyPath { get; set; } = string.Empty;
+        public string ToVersion { get; set; } = string.Empty;
+        public bool AllowProduction { get; set; }
+    }
+
+    private readonly PullForm pullForm = new();
+    private bool pullBusy;
+    private string? pullError;
+    private readonly List<string> pullLog = new();
+    private ClusterArtifactManifest? pullManifest;
+
+    private readonly TrustForm trustForm = new();
+    private bool trustBusy;
+    private string? trustError;
+    private string? trustFingerprint;
+    private bool trustSaved;
+
+    private readonly TopologyForm installForm = new();
+    private bool installBusy;
+    private readonly List<string> installLog = new();
+    private ClusterProvisionResult? installResult;
+
+    private readonly UpgradeForm upgradeForm = new();
+    private bool upgradeBusy;
+    private readonly List<string> upgradeLog = new();
+    private ClusterUpgradeResult? upgradeResult;
+
+    private readonly TopologyForm statusForm = new();
+    private bool statusBusy;
+    private string? statusError;
+    private ClusterTopologyValidationResult? statusValidation;
+    private ClusterUpgradePlan? statusPlan;
+
+    private async Task HandlePull()
+    {
+        if (string.IsNullOrWhiteSpace(pullForm.Version))
+        {
+            pullError = "version is required";
+            return;
+        }
+        pullError = null;
+        pullManifest = null;
+        pullBusy = true;
+        pullLog.Clear();
+        var progress = new Progress<string>(msg => { pullLog.Add(msg); InvokeAsync(StateHasChanged); });
+        try
+        {
+            var archs = pullForm.Arch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var output = string.IsNullOrWhiteSpace(pullForm.OutputDirectory)
+                ? Path.Combine(Environment.CurrentDirectory, "rke2-bundle")
+                : Path.GetFullPath(pullForm.OutputDirectory);
+            pullManifest = await Artifacts.PullAsync(new ClusterArtifactPullOptions
+            {
+                OutputDirectory = output,
+                Distro = pullForm.Distro,
+                Version = pullForm.Version,
+                Architectures = archs,
+                IncludeKubectl = pullForm.Kubectl,
+                IncludeHelm = pullForm.Helm,
+                IncludeK9s = pullForm.K9s
+            }, progress);
+        }
+        catch (Exception ex)
+        {
+            pullError = ex.Message;
+        }
+        finally
+        {
+            pullBusy = false;
+        }
+    }
+
+    private async Task HandleTrustProbe()
+    {
+        if (string.IsNullOrWhiteSpace(trustForm.Host) || string.IsNullOrWhiteSpace(trustForm.Username))
+        {
+            trustError = "host and ssh user are required";
+            return;
+        }
+        trustError = null;
+        trustFingerprint = null;
+        trustSaved = false;
+        trustBusy = true;
+        try
+        {
+            var connection = new NodeConnection { Mode = NodeConnectionMode.Ssh, Host = trustForm.Host, Port = trustForm.Port, Username = trustForm.Username };
+            trustFingerprint = await SshNodeExecutor.ProbeHostKeyFingerprintAsync(connection);
+        }
+        catch (Exception ex)
+        {
+            trustError = ex.Message;
+        }
+        finally
+        {
+            trustBusy = false;
+        }
+    }
+
+    private void HandleTrustConfirm()
+    {
+        if (trustFingerprint is null)
+        {
+            return;
+        }
+        KnownHostsStore.Default().Trust(trustForm.Host, trustForm.Port, trustFingerprint);
+        trustSaved = true;
+    }
+
+    private async Task HandleInstall()
+    {
+        if (string.IsNullOrWhiteSpace(installForm.TopologyPath))
+        {
+            return;
+        }
+        installBusy = true;
+        installResult = null;
+        installLog.Clear();
+        var progress = new Progress<string>(msg => { installLog.Add(msg); InvokeAsync(StateHasChanged); });
+        try
+        {
+            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(installForm.TopologyPath));
+            installResult = await Provisioning.InstallAsync(new ClusterProvisionOptions
+            {
+                Topology = topology,
+                AllowProduction = installForm.AllowProduction
+            }, progress);
+        }
+        catch (Exception ex)
+        {
+            installResult = new ClusterProvisionResult { Ok = false, Errors = [ex.Message], CompletedSteps = [] };
+        }
+        finally
+        {
+            installBusy = false;
+        }
+    }
+
+    private async Task HandleUpgrade()
+    {
+        if (string.IsNullOrWhiteSpace(upgradeForm.TopologyPath) || string.IsNullOrWhiteSpace(upgradeForm.ToVersion))
+        {
+            return;
+        }
+        upgradeBusy = true;
+        upgradeResult = null;
+        upgradeLog.Clear();
+        var progress = new Progress<string>(msg => { upgradeLog.Add(msg); InvokeAsync(StateHasChanged); });
+        try
+        {
+            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(upgradeForm.TopologyPath));
+            upgradeResult = await Provisioning.UpgradeAsync(new ClusterProvisionOptions
+            {
+                Topology = topology,
+                AllowProduction = upgradeForm.AllowProduction
+            }, upgradeForm.ToVersion, progress);
+        }
+        catch (Exception ex)
+        {
+            upgradeResult = new ClusterUpgradeResult { Ok = false, Errors = [ex.Message], UpgradedNodes = [], SkippedNodes = [] };
+        }
+        finally
+        {
+            upgradeBusy = false;
+        }
+    }
+
+    private async Task HandleStatus()
+    {
+        if (string.IsNullOrWhiteSpace(statusForm.TopologyPath))
+        {
+            statusError = "topology path is required";
+            return;
+        }
+        statusError = null;
+        statusValidation = null;
+        statusPlan = null;
+        statusBusy = true;
+        try
+        {
+            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(statusForm.TopologyPath));
+            statusValidation = ClusterTopologyValidator.Validate(topology);
+            statusPlan = await Planner.PlanAsync(topology, topology.Version);
+        }
+        catch (Exception ex)
+        {
+            statusError = ex.Message;
+        }
+        finally
+        {
+            statusBusy = false;
+        }
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes >= 1024L * 1024 * 1024) return $"{bytes / 1024.0 / 1024 / 1024:F2} GB";
+        if (bytes >= 1024L * 1024) return $"{bytes / 1024.0 / 1024:F2} MB";
+        if (bytes >= 1024) return $"{bytes / 1024.0:F2} KB";
+        return $"{bytes} B";
+    }
+}
