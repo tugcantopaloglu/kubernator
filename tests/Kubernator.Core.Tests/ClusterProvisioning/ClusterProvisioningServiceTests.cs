@@ -102,6 +102,55 @@ public sealed class ClusterProvisioningServiceTests
     }
 
     [Fact]
+    public async Task Install_ha_topology_joins_masters_sequentially_then_agents_for_k3s()
+    {
+        var executor = new RecordingNodeExecutor();
+        var osDetector = new FakeOsDetector();
+        var provisioner = new FakeClusterDistroProvisioner { Kind = DistroKind.K3s, JoinPort = 6443 };
+        var monitor = new FakeClusterMonitor();
+        var applier = new FakeClusterApplier();
+        var processRunner = new RecordingProcessRunner();
+        var upgradePlanner = new ClusterUpgradePlanner(executor, osDetector, [provisioner]);
+        var service = new ClusterProvisioningService(executor, osDetector, [provisioner], monitor, applier, processRunner, upgradePlanner);
+
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.K3s,
+            Version = "v1.30.4+k3s1",
+            Nodes = [Server("m1", isInit: true), Server("m2"), Server("m3"), Agent("w1"), Agent("w2")],
+            FixedRegistrationAddresses = ["lb.internal"],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = await service.InstallAsync(new ClusterProvisionOptions { Topology = topology });
+
+        result.Ok.Should().BeTrue(because: string.Join("; ", result.Errors));
+
+        var events = provisioner.Events;
+        events.Should().Contain("BootstrapFirstServer:m1");
+        events.Should().Contain("JoinAdditionalServer:m2");
+        events.Should().Contain("JoinAdditionalServer:m3");
+        events.Should().Contain("JoinAgent:w1");
+        events.Should().Contain("JoinAgent:w2");
+
+        var bootstrapIdx = events.IndexOf("BootstrapFirstServer:m1");
+        var m2Idx = events.IndexOf("JoinAdditionalServer:m2");
+        var m3Idx = events.IndexOf("JoinAdditionalServer:m3");
+        var w1Idx = events.IndexOf("JoinAgent:w1");
+        var w2Idx = events.IndexOf("JoinAgent:w2");
+
+        bootstrapIdx.Should().BeLessThan(m2Idx);
+        m2Idx.Should().BeLessThan(m3Idx, because: "additional servers must join one at a time, in order, for etcd quorum safety, same as RKE2");
+        m3Idx.Should().BeLessThan(w1Idx, because: "agents must only join after the whole control plane is up");
+        m3Idx.Should().BeLessThan(w2Idx);
+
+        applier.Registrations.Should().ContainSingle();
+        applier.Registrations[0].ServerUrl.Should().Be(
+            "https://lb.internal:6443", because: "ApiServerPort is used for the final kubeconfig URL, not JoinPort, even though both are 6443 for k3s");
+    }
+
+    [Fact]
     public async Task Install_single_server_topology_does_not_require_fixed_registration_address()
     {
         var (service, _, _, applier, _) = BuildService();

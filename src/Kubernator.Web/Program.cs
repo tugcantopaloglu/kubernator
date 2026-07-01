@@ -11,6 +11,7 @@ using Kubernator.Web.Downloads;
 using Kubernator.Web.Jobs;
 using Kubernator.Web.Logging;
 using Kubernator.Web.Services;
+using Microsoft.Extensions.Configuration;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -21,24 +22,15 @@ using Microsoft.OpenApi.Models;
 using Serilog;
 using Serilog.Events;
 
+var bootstrapConfig = new ConfigurationBuilder()
+    .SetBasePath(Directory.GetCurrentDirectory())
+    .AddJsonFile("appsettings.json", optional: true)
+    .AddEnvironmentVariables()
+    .Build();
+
 Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Information()
-    .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-    .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Information)
-    .Enrich.FromLogContext()
-    .Enrich.WithMachineName()
-    .Enrich.WithProcessId()
-    .Enrich.WithThreadId()
-    .WriteTo.Console(outputTemplate:
-        "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}  {Message:lj}{NewLine}{Exception}")
-    .WriteTo.File(
-        new Serilog.Formatting.Compact.CompactJsonFormatter(),
-        KubernatorLogPaths.ResolveWebLogPath(),
-        rollingInterval: RollingInterval.Day,
-        retainedFileCountLimit: 14,
-        fileSizeLimitBytes: 50_000_000,
-        rollOnFileSizeLimit: true,
-        shared: true)
+    .ReadFrom.Configuration(bootstrapConfig)
+    .ApplyKubernatorSinks()
     .CreateBootstrapLogger();
 
 try
@@ -48,23 +40,7 @@ try
     builder.Host.UseSerilog((ctx, services, cfg) => cfg
         .ReadFrom.Configuration(ctx.Configuration)
         .ReadFrom.Services(services)
-        .MinimumLevel.Information()
-        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-        .MinimumLevel.Override("Microsoft.AspNetCore.Hosting.Diagnostics", LogEventLevel.Information)
-        .Enrich.FromLogContext()
-        .Enrich.WithMachineName()
-        .Enrich.WithProcessId()
-        .Enrich.WithThreadId()
-        .WriteTo.Console(outputTemplate:
-            "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}{NewLine}  {Message:lj}{NewLine}{Exception}")
-        .WriteTo.File(
-            new Serilog.Formatting.Compact.CompactJsonFormatter(),
-            KubernatorLogPaths.ResolveWebLogPath(),
-            rollingInterval: RollingInterval.Day,
-            retainedFileCountLimit: 14,
-            fileSizeLimitBytes: 50_000_000,
-            rollOnFileSizeLimit: true,
-            shared: true));
+        .ApplyKubernatorSinks());
 
     builder.Services.AddRazorComponents()
         .AddInteractiveServerComponents();
@@ -75,6 +51,8 @@ try
     builder.Services.AddScoped<BuildPipeline>();
     builder.Services.AddSingleton<AuthService>();
     builder.Services.AddSingleton<IApiKeyStore, SqliteApiKeyStore>();
+    builder.Services.AddSingleton<ApiKeyRateLimitCache>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ApiKeyRateLimitCache>());
     builder.Services.AddSingleton<AuditLog>();
     builder.Services.AddSingleton<InMemoryJobManager>();
     builder.Services.AddSingleton<IJobManager>(sp => sp.GetRequiredService<InMemoryJobManager>());
@@ -137,14 +115,10 @@ try
             var perMinute = SqliteApiKeyStore.DefaultRateLimitPerMinute;
             if (keyId is { Length: > 0 } && keyId != "bootstrap")
             {
-                var store = ctx.RequestServices.GetService<IApiKeyStore>();
-                if (store is not null)
+                var cache = ctx.RequestServices.GetService<ApiKeyRateLimitCache>();
+                if (cache is not null)
                 {
-                    var record = store.GetAsync(keyId, ctx.RequestAborted).GetAwaiter().GetResult();
-                    if (record is not null)
-                    {
-                        perMinute = record.RateLimitPerMinute;
-                    }
+                    perMinute = cache.GetRateLimit(keyId, perMinute);
                 }
             }
             return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions

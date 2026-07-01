@@ -78,6 +78,31 @@ public sealed class ClusterUpgradePlannerTests
     }
 
     [Fact]
+    public async Task Same_core_different_build_suffix_still_needs_upgrade()
+    {
+        var executor = new RecordingNodeExecutor();
+        var osDetector = new FakeOsDetector();
+        var provisioner = new FakeClusterDistroProvisioner
+        {
+            VersionResponder = _ => new NodeVersionInfo { Installed = true, Version = "v1.30.4+rke2r1", Role = NodeRole.Server }
+        };
+        var planner = new ClusterUpgradePlanner(executor, osDetector, [provisioner]);
+
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.Rke2,
+            Version = "v1.30.4+rke2r1",
+            Nodes = [Server("m1", isInit: true)],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var plan = await planner.PlanAsync(topology, "v1.30.4+rke2r2");
+
+        plan.Steps[0].NeedsUpgrade.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Uninstalled_nodes_need_upgrade()
     {
         var executor = new RecordingNodeExecutor();

@@ -1,7 +1,10 @@
 using System.Formats.Tar;
 using System.IO.Compression;
+using Kubernator.Core.AirGapped;
 using Kubernator.Core.ClusterProvisioning.Artifacts;
 using Kubernator.Core.ClusterProvisioning.Distros;
+using Kubernator.Core.Containers;
+using NSubstitute;
 
 namespace Kubernator.Core.Tests.ClusterProvisioning.Artifacts;
 
@@ -106,7 +109,7 @@ public sealed class ClusterArtifactBundleServiceTests : IDisposable
         await File.WriteAllTextAsync(Path.Combine(bundleDir, "artifacts", "amd64", "rke2.linux-amd64.tar.gz"), "fake-tar-content");
 
         var archivePath = Path.Combine(bundleDir, "bundle.tar.gz");
-        var sut = new ClusterArtifactBundleService(new HttpClient());
+        var sut = new ClusterArtifactBundleService(new HttpClient(), Substitute.For<IImageBundleService>(), Substitute.For<IContainerEngineProvider>());
 
         var returned = await sut.PackAsync(bundleDir, archivePath);
 

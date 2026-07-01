@@ -29,4 +29,5 @@ ENV ASPNETCORE_HTTP_PORTS=5050 \
 USER 1654:1654
 EXPOSE 5050
 VOLUME ["/var/lib/kubernator"]
-ENTRYPOINT ["dotnet", "/app/Kubernator.Web.dll", "--bind=0.0.0.0:5050", "--allow-insecure-network=true"]
+ENTRYPOINT ["dotnet", "/app/Kubernator.Web.dll"]
+CMD ["--bind=0.0.0.0:5050"]

@@ -35,7 +35,7 @@ public sealed class ClusterUpgradePlanner
             ct.ThrowIfCancellationRequested();
             var os = await osDetector.DetectAsync(node.Connection, executor, ct);
             var versionInfo = await provisioner.GetInstalledVersionAsync(node.Connection, executor, ct);
-            var needsUpgrade = !versionInfo.Installed || !string.Equals(versionInfo.Version, targetVersion, StringComparison.Ordinal);
+            var needsUpgrade = !versionInfo.Installed || DistroVersionComparer.NeedsUpgrade(versionInfo.Version, targetVersion);
 
             steps.Add(new NodeUpgradeStep
             {

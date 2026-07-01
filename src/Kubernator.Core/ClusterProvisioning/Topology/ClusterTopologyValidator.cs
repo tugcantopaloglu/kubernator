@@ -70,6 +70,11 @@ public static class ClusterTopologyValidator
             warnings.Add("topology has no agent (worker) nodes; the control plane will need to run workloads itself");
         }
 
+        if (topology.Distro == DistroKind.KubeadmNative && topology.CniPlugin is not ("flannel" or "calico"))
+        {
+            errors.Add($"kubeadm topologies must set cniPlugin to 'flannel' or 'calico' (got '{topology.CniPlugin}')");
+        }
+
         foreach (var node in topology.Nodes)
         {
             if (node.Connection.Mode == Ssh.NodeConnectionMode.Ssh && string.IsNullOrWhiteSpace(node.Connection.Host))

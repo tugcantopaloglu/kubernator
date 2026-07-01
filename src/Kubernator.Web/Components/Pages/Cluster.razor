@@ -6,9 +6,11 @@
 @using Kubernator.Core.ClusterProvisioning.Ssh
 @using Kubernator.Core.ClusterProvisioning.Topology
 @using Kubernator.Core.ClusterProvisioning.Upgrade
-@inject IClusterArtifactBundleService Artifacts
-@inject IClusterProvisioningService Provisioning
-@inject ClusterUpgradePlanner Planner
+@using Kubernator.Web.Api
+@using Kubernator.Web.Components.Shared
+@using Kubernator.Web.Jobs
+@inject IJobManager Jobs
+@inject IServiceScopeFactory ScopeFactory
 
 <PageTitle>cluster · kubernator</PageTitle>
 
@@ -26,6 +28,7 @@
                 <InputSelect id="cl-distro" @bind-Value="pullForm.Distro">
                     <option value="@DistroKind.Rke2">rke2</option>
                     <option value="@DistroKind.K3s">k3s</option>
+                    <option value="@DistroKind.KubeadmNative">kubeadm</option>
                 </InputSelect>
             </div>
             <div class="form-row">
@@ -59,10 +62,7 @@
             <div class="banner err"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body"><span class="label">error</span>@pullError</div></div>
         }
     </EditForm>
-    @if (pullLog.Count > 0)
-    {
-        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', pullLog)</div>
-    }
+    <JobProgressPanel @ref="pullPanel" OnCompleted="OnPullJobCompleted" />
     @if (pullManifest is not null)
     {
         <div class="table-wrap" style="margin-top:var(--s-3)">
@@ -137,10 +137,7 @@
             <span class="muted" style="font-size:12px">HA master(s) + workers, one click — this can take several minutes</span>
         </div>
     </EditForm>
-    @if (installLog.Count > 0)
-    {
-        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', installLog)</div>
-    }
+    <JobProgressPanel @ref="installPanel" OnCompleted="OnInstallJobCompleted" />
     @if (installResult is not null)
     {
         <div class="banner @(installResult.Ok ? "ok" : "err")" style="margin-top:var(--s-3)">
@@ -177,10 +174,7 @@
             <span class="muted" style="font-size:12px">auto-detects each node's installed version and skips nodes already current</span>
         </div>
     </EditForm>
-    @if (upgradeLog.Count > 0)
-    {
-        <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', upgradeLog)</div>
-    }
+    <JobProgressPanel @ref="upgradePanel" OnCompleted="OnUpgradeJobCompleted" />
     @if (upgradeResult is not null)
     {
         <div class="card-grid" style="margin-top:var(--s-3)">
@@ -210,33 +204,31 @@
             <div class="banner err"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body"><span class="label">error</span>@statusError</div></div>
         }
     </EditForm>
-    @if (statusValidation is not null)
+    <JobProgressPanel @ref="statusPanel" OnCompleted="OnStatusJobCompleted" />
+    @if (statusResult is not null)
     {
-        @foreach (var warning in statusValidation.Warnings)
+        @foreach (var warning in statusResult.Warnings)
         {
             <div class="banner info" style="margin-top:var(--s-2)"><div class="banner-body">@warning</div></div>
         }
-        @foreach (var e in statusValidation.Errors)
+        @foreach (var e in statusResult.Errors)
         {
             <div class="banner err" style="margin-top:var(--s-2)"><div class="banner-body">@e</div></div>
         }
-    }
-    @if (statusPlan is not null)
-    {
         <div class="table-wrap" style="margin-top:var(--s-3)">
             <table class="t">
                 <thead><tr><th>node</th><th>role</th><th>os</th><th>current</th><th>target</th><th>status</th></tr></thead>
                 <tbody>
-                    @foreach (var step in statusPlan.Steps)
+                    @foreach (var node in statusResult.Nodes)
                     {
                         <tr>
-                            <td><code>@step.Node.Name</code></td>
-                            <td>@step.Node.Role.ToString().ToLowerInvariant()</td>
-                            <td>@step.Os.DistroId @step.Os.VersionId (@step.Os.Arch)</td>
-                            <td>@(step.CurrentVersion ?? "(not installed)")</td>
-                            <td>@step.TargetVersion</td>
+                            <td><code>@node.Name</code></td>
+                            <td>@node.Role.ToLowerInvariant()</td>
+                            <td>@node.Os</td>
+                            <td>@(node.CurrentVersion ?? "(not installed)")</td>
+                            <td>@node.TargetVersion</td>
                             <td>
-                                @if (step.NeedsUpgrade) { <span class="pill run"><span class="dot"></span>upgrade needed</span> }
+                                @if (node.NeedsUpgrade) { <span class="pill run"><span class="dot"></span>upgrade needed</span> }
                                 else { <span class="pill ok"><span class="dot"></span>up to date</span> }
                             </td>
                         </tr>
@@ -282,8 +274,8 @@
     private readonly PullForm pullForm = new();
     private bool pullBusy;
     private string? pullError;
-    private readonly List<string> pullLog = new();
-    private ClusterArtifactManifest? pullManifest;
+    private JobProgressPanel? pullPanel;
+    private ClusterArtifactManifestDto? pullManifest;
 
     private readonly TrustForm trustForm = new();
     private bool trustBusy;
@@ -293,19 +285,19 @@
 
     private readonly TopologyForm installForm = new();
     private bool installBusy;
-    private readonly List<string> installLog = new();
-    private ClusterProvisionResult? installResult;
+    private JobProgressPanel? installPanel;
+    private ClusterInstallResultDto? installResult;
 
     private readonly UpgradeForm upgradeForm = new();
     private bool upgradeBusy;
-    private readonly List<string> upgradeLog = new();
-    private ClusterUpgradeResult? upgradeResult;
+    private JobProgressPanel? upgradePanel;
+    private ClusterUpgradeResultDto? upgradeResult;
 
     private readonly TopologyForm statusForm = new();
     private bool statusBusy;
     private string? statusError;
-    private ClusterTopologyValidationResult? statusValidation;
-    private ClusterUpgradePlan? statusPlan;
+    private JobProgressPanel? statusPanel;
+    private ClusterStatusResponse? statusResult;
 
     private async Task HandlePull()
     {
@@ -317,33 +309,53 @@
         pullError = null;
         pullManifest = null;
         pullBusy = true;
-        pullLog.Clear();
-        var progress = new Progress<string>(msg => { pullLog.Add(msg); InvokeAsync(StateHasChanged); });
-        try
+
+        var archs = pullForm.Arch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var output = string.IsNullOrWhiteSpace(pullForm.OutputDirectory)
+            ? Path.Combine(Environment.CurrentDirectory, "rke2-bundle")
+            : Path.GetFullPath(pullForm.OutputDirectory);
+        var distro = pullForm.Distro;
+        var version = pullForm.Version;
+        var includeKubectl = pullForm.Kubectl;
+        var includeHelm = pullForm.Helm;
+        var includeK9s = pullForm.K9s;
+        var sf = ScopeFactory;
+
+        var record = Jobs.Enqueue(new JobSubmission
         {
-            var archs = pullForm.Arch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            var output = string.IsNullOrWhiteSpace(pullForm.OutputDirectory)
-                ? Path.Combine(Environment.CurrentDirectory, "rke2-bundle")
-                : Path.GetFullPath(pullForm.OutputDirectory);
-            pullManifest = await Artifacts.PullAsync(new ClusterArtifactPullOptions
+            Kind = "cluster-pull",
+            Work = async (ctx, ct) =>
             {
-                OutputDirectory = output,
-                Distro = pullForm.Distro,
-                Version = pullForm.Version,
-                Architectures = archs,
-                IncludeKubectl = pullForm.Kubectl,
-                IncludeHelm = pullForm.Helm,
-                IncludeK9s = pullForm.K9s
-            }, progress);
-        }
-        catch (Exception ex)
+                using var scope = sf.CreateScope();
+                var artifacts = scope.ServiceProvider.GetRequiredService<IClusterArtifactBundleService>();
+                var manifest = await artifacts.PullAsync(new ClusterArtifactPullOptions
+                {
+                    OutputDirectory = output,
+                    Distro = distro,
+                    Version = version,
+                    Architectures = archs,
+                    IncludeKubectl = includeKubectl,
+                    IncludeHelm = includeHelm,
+                    IncludeK9s = includeK9s
+                }, ctx.AsProgress(), ct);
+                return ClusterArtifactManifestDto.From(manifest);
+            }
+        });
+        pullPanel!.Start(record.Id);
+    }
+
+    private void OnPullJobCompleted(JobRecord record)
+    {
+        pullBusy = false;
+        if (record.Status == JobStatus.Succeeded)
         {
-            pullError = ex.Message;
+            pullManifest = record.Result as ClusterArtifactManifestDto;
         }
-        finally
+        else
         {
-            pullBusy = false;
+            pullError = record.Error ?? "pull failed";
         }
+        StateHasChanged();
     }
 
     private async Task HandleTrustProbe()
@@ -390,25 +402,43 @@
         }
         installBusy = true;
         installResult = null;
-        installLog.Clear();
-        var progress = new Progress<string>(msg => { installLog.Add(msg); InvokeAsync(StateHasChanged); });
+
+        ClusterTopology topology;
         try
         {
-            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(installForm.TopologyPath));
-            installResult = await Provisioning.InstallAsync(new ClusterProvisionOptions
-            {
-                Topology = topology,
-                AllowProduction = installForm.AllowProduction
-            }, progress);
+            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(installForm.TopologyPath));
         }
         catch (Exception ex)
         {
-            installResult = new ClusterProvisionResult { Ok = false, Errors = [ex.Message], CompletedSteps = [] };
-        }
-        finally
-        {
+            installResult = new ClusterInstallResultDto { Ok = false, Errors = [ex.Message], CompletedSteps = [] };
             installBusy = false;
+            return;
         }
+
+        var allowProduction = installForm.AllowProduction;
+        var sf = ScopeFactory;
+
+        var record = Jobs.Enqueue(new JobSubmission
+        {
+            Kind = "cluster-install",
+            Work = async (ctx, ct) =>
+            {
+                using var scope = sf.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IClusterProvisioningService>();
+                var result = await service.InstallAsync(
+                    new ClusterProvisionOptions { Topology = topology, AllowProduction = allowProduction }, ctx.AsProgress(), ct);
+                return ClusterInstallResultDto.From(result);
+            }
+        });
+        installPanel!.Start(record.Id);
+    }
+
+    private void OnInstallJobCompleted(JobRecord record)
+    {
+        installBusy = false;
+        installResult = record.Result as ClusterInstallResultDto
+            ?? new ClusterInstallResultDto { Ok = false, Errors = [record.Error ?? "install failed"], CompletedSteps = [] };
+        StateHasChanged();
     }
 
     private async Task HandleUpgrade()
@@ -419,25 +449,44 @@
         }
         upgradeBusy = true;
         upgradeResult = null;
-        upgradeLog.Clear();
-        var progress = new Progress<string>(msg => { upgradeLog.Add(msg); InvokeAsync(StateHasChanged); });
+
+        ClusterTopology topology;
         try
         {
-            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(upgradeForm.TopologyPath));
-            upgradeResult = await Provisioning.UpgradeAsync(new ClusterProvisionOptions
-            {
-                Topology = topology,
-                AllowProduction = upgradeForm.AllowProduction
-            }, upgradeForm.ToVersion, progress);
+            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(upgradeForm.TopologyPath));
         }
         catch (Exception ex)
         {
-            upgradeResult = new ClusterUpgradeResult { Ok = false, Errors = [ex.Message], UpgradedNodes = [], SkippedNodes = [] };
-        }
-        finally
-        {
+            upgradeResult = new ClusterUpgradeResultDto { Ok = false, Errors = [ex.Message], UpgradedNodes = [], SkippedNodes = [] };
             upgradeBusy = false;
+            return;
         }
+
+        var allowProduction = upgradeForm.AllowProduction;
+        var toVersion = upgradeForm.ToVersion;
+        var sf = ScopeFactory;
+
+        var record = Jobs.Enqueue(new JobSubmission
+        {
+            Kind = "cluster-upgrade",
+            Work = async (ctx, ct) =>
+            {
+                using var scope = sf.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<IClusterProvisioningService>();
+                var result = await service.UpgradeAsync(
+                    new ClusterProvisionOptions { Topology = topology, AllowProduction = allowProduction }, toVersion, ctx.AsProgress(), ct);
+                return ClusterUpgradeResultDto.From(result);
+            }
+        });
+        upgradePanel!.Start(record.Id);
+    }
+
+    private void OnUpgradeJobCompleted(JobRecord record)
+    {
+        upgradeBusy = false;
+        upgradeResult = record.Result as ClusterUpgradeResultDto
+            ?? new ClusterUpgradeResultDto { Ok = false, Errors = [record.Error ?? "upgrade failed"], UpgradedNodes = [], SkippedNodes = [] };
+        StateHasChanged();
     }
 
     private async Task HandleStatus()
@@ -448,23 +497,74 @@
             return;
         }
         statusError = null;
-        statusValidation = null;
-        statusPlan = null;
+        statusResult = null;
         statusBusy = true;
+
+        ClusterTopology topology;
         try
         {
-            var topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(statusForm.TopologyPath));
-            statusValidation = ClusterTopologyValidator.Validate(topology);
-            statusPlan = await Planner.PlanAsync(topology, topology.Version);
+            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(statusForm.TopologyPath));
         }
         catch (Exception ex)
         {
             statusError = ex.Message;
-        }
-        finally
-        {
             statusBusy = false;
+            return;
         }
+
+        var sf = ScopeFactory;
+
+        var record = Jobs.Enqueue(new JobSubmission
+        {
+            Kind = "cluster-status",
+            Work = async (ctx, ct) =>
+            {
+                using var scope = sf.CreateScope();
+                var planner = scope.ServiceProvider.GetRequiredService<ClusterUpgradePlanner>();
+                var validation = ClusterTopologyValidator.Validate(topology);
+                foreach (var warning in validation.Warnings)
+                {
+                    ctx.Report($"warning: {warning}");
+                }
+                foreach (var error in validation.Errors)
+                {
+                    ctx.Report($"error: {error}");
+                }
+
+                var plan = await planner.PlanAsync(topology, topology.Version, ct);
+                return new ClusterStatusResponse
+                {
+                    ClusterName = topology.ClusterName,
+                    TopologyOk = validation.Ok,
+                    Errors = validation.Errors,
+                    Warnings = validation.Warnings,
+                    Nodes = plan.Steps.Select(s => new ClusterNodeStatusDto
+                    {
+                        Name = s.Node.Name,
+                        Role = s.Node.Role.ToString(),
+                        Os = $"{s.Os.DistroId} {s.Os.VersionId} ({s.Os.Arch})",
+                        CurrentVersion = s.CurrentVersion,
+                        TargetVersion = s.TargetVersion,
+                        NeedsUpgrade = s.NeedsUpgrade
+                    }).ToArray()
+                };
+            }
+        });
+        statusPanel!.Start(record.Id);
+    }
+
+    private void OnStatusJobCompleted(JobRecord record)
+    {
+        statusBusy = false;
+        if (record.Status == JobStatus.Succeeded)
+        {
+            statusResult = record.Result as ClusterStatusResponse;
+        }
+        else
+        {
+            statusError = record.Error ?? "status check failed";
+        }
+        StateHasChanged();
     }
 
     private static string FormatSize(long bytes)

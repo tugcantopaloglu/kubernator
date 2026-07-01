@@ -1,0 +1,76 @@
+@implements IAsyncDisposable
+@using Kubernator.Web.Jobs
+@inject IJobManager Jobs
+
+@if (log.Count > 0)
+{
+    <div class="log" aria-live="polite" style="margin-top:var(--s-3)">@string.Join('\n', log)</div>
+}
+@if (record?.Status == JobStatus.Failed)
+{
+    <div class="banner err" style="margin-top:var(--s-3)">
+        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+        <div class="banner-body"><span class="label">error</span>@record.Error</div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<JobRecord> OnCompleted { get; set; }
+
+    private JobRecord? record;
+    private readonly List<string> log = new();
+    private CancellationTokenSource? cts;
+    private Task? pollLoop;
+
+    public void Start(string jobId)
+    {
+        Reset();
+        cts = new CancellationTokenSource();
+        pollLoop = PollAsync(jobId, cts.Token);
+    }
+
+    public void Reset()
+    {
+        record = null;
+        log.Clear();
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = null;
+    }
+
+    private async Task PollAsync(string jobId, CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        do
+        {
+            var current = Jobs.Get(jobId);
+            if (current is null)
+            {
+                continue;
+            }
+
+            record = current;
+            log.Clear();
+            log.AddRange(current.Progress.Select(p => $"[{p.Timestamp:HH:mm:ss}] {p.Message}"));
+            await InvokeAsync(StateHasChanged);
+
+            if (current.Status is JobStatus.Succeeded or JobStatus.Failed or JobStatus.Cancelled)
+            {
+                await OnCompleted.InvokeAsync(current);
+                return;
+            }
+        }
+        while (await timer.WaitForNextTickAsync(ct));
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        if (pollLoop is not null)
+        {
+            try { await pollLoop; }
+            catch (OperationCanceledException) { }
+        }
+        cts?.Dispose();
+    }
+}

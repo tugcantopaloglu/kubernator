@@ -2,10 +2,12 @@ using System.ComponentModel;
 using System.Globalization;
 using Kubernator.Core.ClusterProvisioning;
 using Kubernator.Core.ClusterProvisioning.Artifacts;
+using Kubernator.Core.ClusterProvisioning.Discovery;
 using Kubernator.Core.ClusterProvisioning.Distros;
 using Kubernator.Core.ClusterProvisioning.Ssh;
 using Kubernator.Core.ClusterProvisioning.Topology;
 using Kubernator.Core.ClusterProvisioning.Upgrade;
+using Kubernator.Core.Deployment;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -16,21 +18,27 @@ internal sealed class ClusterCommand : AsyncCommand<ClusterCommand.Settings>
     private readonly IClusterArtifactBundleService artifactService;
     private readonly IClusterProvisioningService provisioningService;
     private readonly ClusterUpgradePlanner upgradePlanner;
+    private readonly ClusterTopologyDiscoverer discoverer;
+    private readonly IClusterApplier applier;
 
     public ClusterCommand(
         IClusterArtifactBundleService artifactService,
         IClusterProvisioningService provisioningService,
-        ClusterUpgradePlanner upgradePlanner)
+        ClusterUpgradePlanner upgradePlanner,
+        ClusterTopologyDiscoverer discoverer,
+        IClusterApplier applier)
     {
         this.artifactService = artifactService;
         this.provisioningService = provisioningService;
         this.upgradePlanner = upgradePlanner;
+        this.discoverer = discoverer;
+        this.applier = applier;
     }
 
     public sealed class Settings : CommandSettings
     {
         [CommandArgument(0, "<action>")]
-        [Description("Action: pull | trust-host | install | upgrade | status")]
+        [Description("Action: pull | trust-host | install | upgrade | status | discover")]
         public string Action { get; init; } = string.Empty;
 
         [CommandOption("-o|--output <path>")]
@@ -101,15 +109,40 @@ internal sealed class ClusterCommand : AsyncCommand<ClusterCommand.Settings>
 
         [CommandOption("--port <port>")]
         [DefaultValue(22)]
+        [Description("SSH port, for `trust-host` and applied to every node for `discover`.")]
         public int Port { get; init; } = 22;
 
         [CommandOption("--user <user>")]
-        [Description("SSH username for `trust-host`.")]
+        [Description("SSH username, for `trust-host` and applied to every node for `discover`.")]
         public string? User { get; init; }
 
         [CommandOption("--confirm")]
         [Description("Persist the fingerprint shown by `trust-host` (without this flag it is only printed).")]
         public bool Confirm { get; init; }
+
+        [CommandOption("--context <ctx>")]
+        [Description("kubectl context to discover from, for `discover` (default: current context).")]
+        public string? Context { get; init; }
+
+        [CommandOption("--cluster-name <name>")]
+        [Description("Cluster name to record in the discovered topology, for `discover`.")]
+        public string? ClusterName { get; init; }
+
+        [CommandOption("--ssh-key-vault-id <id>")]
+        [Description("Vault entry id for the SSH private key applied to every discovered node, for `discover`.")]
+        public string? SshKeyVaultId { get; init; }
+
+        [CommandOption("--ssh-key-path <path>")]
+        [Description("Path to an SSH private key applied to every discovered node, for `discover`.")]
+        public string? SshKeyPath { get; init; }
+
+        [CommandOption("--fixed-registration-address <addrs>")]
+        [Description("Comma-separated stable HA registration address(es), for `discover`.")]
+        public string? FixedRegistrationAddresses { get; init; }
+
+        [CommandOption("--bundle-path <path>")]
+        [Description("Local artifact bundle path to record in the discovered topology, for `discover` (fill in later if not yet pulled).")]
+        public string? BundlePath { get; init; }
 
         public override ValidationResult Validate()
         {
@@ -130,9 +163,10 @@ internal sealed class ClusterCommand : AsyncCommand<ClusterCommand.Settings>
             case "install": return await InstallAsync(settings);
             case "upgrade": return await UpgradeAsync(settings);
             case "status": return await StatusAsync(settings);
+            case "discover": return await DiscoverAsync(settings);
             default:
                 AnsiConsole.MarkupLine($"[red]unknown action:[/] {Markup.Escape(settings.Action)}");
-                AnsiConsole.MarkupLine("[grey]use one of: pull, trust-host, install, upgrade, status[/]");
+                AnsiConsole.MarkupLine("[grey]use one of: pull, trust-host, install, upgrade, status, discover[/]");
                 return 12;
         }
     }
@@ -154,9 +188,9 @@ internal sealed class ClusterCommand : AsyncCommand<ClusterCommand.Settings>
             AnsiConsole.MarkupLine($"[red]unsupported distro:[/] {Markup.Escape(settings.Distro)}");
             return 13;
         }
-        if (distro is not (DistroKind.Rke2 or DistroKind.K3s))
+        if (distro is not (DistroKind.Rke2 or DistroKind.K3s or DistroKind.KubeadmNative))
         {
-            AnsiConsole.MarkupLine($"[red]pulling artifacts for distro '{distro}' is not implemented yet — only 'rke2' and 'k3s' are supported[/]");
+            AnsiConsole.MarkupLine($"[red]pulling artifacts for distro '{distro}' is not implemented yet — only 'rke2', 'k3s', and 'kubeadm' are supported[/]");
             return 13;
         }
 
@@ -327,6 +361,93 @@ internal sealed class ClusterCommand : AsyncCommand<ClusterCommand.Settings>
         }
         AnsiConsole.Write(table);
         return validation.Ok ? 0 : 1;
+    }
+
+    private async Task<int> DiscoverAsync(Settings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.Output))
+        {
+            AnsiConsole.MarkupLine("[red]--output is required[/]");
+            return 13;
+        }
+        if (string.IsNullOrWhiteSpace(settings.ClusterName))
+        {
+            AnsiConsole.MarkupLine("[red]--cluster-name is required[/]");
+            return 13;
+        }
+        if (string.IsNullOrWhiteSpace(settings.Version))
+        {
+            AnsiConsole.MarkupLine("[red]--version is required[/]");
+            return 13;
+        }
+        if (string.IsNullOrWhiteSpace(settings.User))
+        {
+            AnsiConsole.MarkupLine("[red]--user is required (SSH username applied to every discovered node)[/]");
+            return 13;
+        }
+        if (!TryParseDistro(settings.Distro, out var distro))
+        {
+            AnsiConsole.MarkupLine($"[red]unsupported distro:[/] {Markup.Escape(settings.Distro)}");
+            return 13;
+        }
+
+        var ctxName = settings.Context;
+        if (string.IsNullOrWhiteSpace(ctxName))
+        {
+            var contexts = await applier.ListContextsAsync();
+            var current = contexts.FirstOrDefault(c => c.IsCurrent);
+            if (current is null)
+            {
+                AnsiConsole.MarkupLine("[red]no current kubectl context — pass --context[/]");
+                return 41;
+            }
+            ctxName = current.Name;
+        }
+
+        var fixedAddresses = string.IsNullOrWhiteSpace(settings.FixedRegistrationAddresses)
+            ? Array.Empty<string>()
+            : settings.FixedRegistrationAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var result = await discoverer.DiscoverAsync(new ClusterDiscoveryOptions
+        {
+            Context = ctxName,
+            ClusterName = settings.ClusterName,
+            Distro = distro,
+            Version = settings.Version,
+            LocalArtifactBundlePath = string.IsNullOrWhiteSpace(settings.BundlePath) ? "REPLACE_WITH_LOCAL_ARTIFACT_BUNDLE_PATH" : settings.BundlePath,
+            SshUsername = settings.User,
+            SshPrivateKeyVaultId = settings.SshKeyVaultId,
+            SshPrivateKeyPath = settings.SshKeyPath,
+            SshPort = settings.Port,
+            FixedRegistrationAddresses = fixedAddresses
+        });
+
+        foreach (var error in result.Errors)
+        {
+            AnsiConsole.MarkupLine($"[red]error[/] {Markup.Escape(error)}");
+        }
+        foreach (var warning in result.Warnings)
+        {
+            AnsiConsole.MarkupLine($"[yellow]warning[/] {Markup.Escape(warning)}");
+        }
+
+        var table = new Table().AddColumn("node").AddColumn("role").AddColumn("host").AddColumn("init").Border(TableBorder.Rounded);
+        foreach (var node in result.Topology.Nodes)
+        {
+            table.AddRow(
+                Markup.Escape(node.Name),
+                node.Role.ToString().ToLowerInvariant(),
+                Markup.Escape(node.Connection.Host ?? "-"),
+                node.IsInitServer ? "[green]yes[/]" : "-");
+        }
+        AnsiConsole.Write(table);
+
+        var outputPath = Path.GetFullPath(settings.Output);
+        await ClusterTopologyJson.SaveAsync(outputPath, result.Topology);
+        AnsiConsole.MarkupLine($"[green]wrote[/] {Markup.Escape(outputPath)}");
+        AnsiConsole.MarkupLine("[grey]this is a best-effort topology — review credentials, localArtifactBundlePath, and any warnings/errors above before using it with install/upgrade[/]");
+
+        return result.Errors.Count == 0 ? 0 : 1;
     }
 
     private static bool TryParseDistro(string raw, out DistroKind distro)

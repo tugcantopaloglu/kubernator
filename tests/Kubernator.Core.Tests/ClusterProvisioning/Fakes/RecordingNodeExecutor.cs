@@ -5,7 +5,7 @@ namespace Kubernator.Core.Tests.ClusterProvisioning.Fakes;
 internal sealed class RecordingNodeExecutor : INodeExecutor
 {
     public sealed record ExecCall(NodeConnection Connection, NodeCommand Command);
-    public sealed record UploadCall(NodeConnection Connection, string RemotePath, bool UseSudo);
+    public sealed record UploadCall(NodeConnection Connection, string RemotePath, bool UseSudo, string? Content = null);
 
     public List<ExecCall> ExecCalls { get; } = [];
     public List<UploadCall> UploadCalls { get; } = [];
@@ -30,7 +30,7 @@ internal sealed class RecordingNodeExecutor : INodeExecutor
     {
         lock (UploadCalls)
         {
-            UploadCalls.Add(new UploadCall(connection, remotePath, useSudo));
+            UploadCalls.Add(new UploadCall(connection, remotePath, useSudo, localPath));
         }
         return Task.CompletedTask;
     }
@@ -41,7 +41,7 @@ internal sealed class RecordingNodeExecutor : INodeExecutor
     {
         lock (UploadCalls)
         {
-            UploadCalls.Add(new UploadCall(connection, remotePath, useSudo));
+            UploadCalls.Add(new UploadCall(connection, remotePath, useSudo, content));
         }
         return Task.CompletedTask;
     }

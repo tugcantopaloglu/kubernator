@@ -12,11 +12,13 @@ namespace Kubernator.Web.Api.Controllers;
 public sealed class AdminApiKeysController : ControllerBase
 {
     private readonly IApiKeyStore store;
+    private readonly ApiKeyRateLimitCache rateLimitCache;
     private readonly ILogger<AdminApiKeysController> logger;
 
-    public AdminApiKeysController(IApiKeyStore store, ILogger<AdminApiKeysController> logger)
+    public AdminApiKeysController(IApiKeyStore store, ApiKeyRateLimitCache rateLimitCache, ILogger<AdminApiKeysController> logger)
     {
         this.store = store;
+        this.rateLimitCache = rateLimitCache;
         this.logger = logger;
     }
 
@@ -69,6 +71,7 @@ public sealed class AdminApiKeysController : ControllerBase
             ExpiresAt = request.ExpiresAt,
             RateLimitPerMinute = request.RateLimitPerMinute
         }, ct);
+        rateLimitCache.Set(result.Record.Id, result.Record.RateLimitPerMinute);
 
         return CreatedAtAction(nameof(Get), new { id = result.Record.Id }, new CreateApiKeyResponse
         {
@@ -95,6 +98,7 @@ public sealed class AdminApiKeysController : ControllerBase
     {
         var ok = await store.RemoveAsync(id, ct);
         if (!ok) throw ApiException.NotFound("api key not found", id);
+        rateLimitCache.Remove(id);
         logger.LogInformation("admin deleted api key {Id}", id);
         return NoContent();
     }

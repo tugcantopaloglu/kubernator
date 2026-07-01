@@ -15,6 +15,8 @@ public sealed record ClusterArtifactPullOptions
     public string K9sVersion { get; init; } = "v0.32.5";
     public bool IncludeSelinuxPolicy { get; init; }
     public string? SelinuxPolicyVersion { get; init; }
+    public string FlannelVersion { get; init; } = "v0.25.6";
+    public string CalicoVersion { get; init; } = "v3.28.1";
 }
 
 public sealed record ClusterArtifactEntry

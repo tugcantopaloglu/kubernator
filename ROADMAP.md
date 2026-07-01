@@ -38,18 +38,29 @@ Not committed to any release; pick items up as needed.
 
 ## Pre-existing codebase backlog (unrelated to cluster provisioning)
 
-- [ ] **Rate limiter sync-over-async** (`Kubernator.Web/Program.cs`, partition callback)
-  — does a blocking `.GetAwaiter().GetResult()` against SQLite on every request to read
-  per-key rate limits. Under load this can starve the thread pool. Should cache
-  scopes/limits in memory with periodic refresh instead.
+- [x] **Rate limiter sync-over-async** — the partition callback no longer calls
+  `IApiKeyStore.GetAsync(...).GetAwaiter().GetResult()` against SQLite on every request.
+  Added `ApiKeyRateLimitCache` (a `BackgroundService` + in-memory `ConcurrentDictionary`)
+  that refreshes all key rate limits from SQLite every 30s; `AdminApiKeysController`
+  also primes/evicts it directly on key create/delete so a freshly created key's custom
+  limit takes effect immediately instead of waiting for the next refresh tick.
 - [ ] **Blazor UI bypasses the API/audit/rate-limit layer** — pages like `Monitor.razor`
   inject `Kubernator.Core` services directly rather than going through
   `Kubernator.Web.Api` controllers, so UI-driven actions aren't rate-limited,
   API-key-scoped, or written to the audit log (session cookie auth only). `Cluster.razor`
   follows the same existing convention for consistency, so it has the same gap.
-- [ ] **`Kubernator.Web` Dockerfile hardcodes `--allow-insecure-network=true`** in the
-  `ENTRYPOINT`, disabling the loopback-only safety check by default inside the
-  container. Either remove it or document the TLS-termination requirement clearly.
+- [x] **`Kubernator.Web` Dockerfile hardcodes `--allow-insecure-network=true`** — the
+  flag was baked into `ENTRYPOINT` itself, so every consumer (`docker run`, the sample
+  k8s manifest's `args:`, plain `docker compose`) silently inherited the insecure default
+  with no visibility into it, and since the k8s manifest *also* passed `--bind`/
+  `--allow-insecure-network` as `args:`, the process actually received those flags twice.
+  Split the Dockerfile into `ENTRYPOINT ["dotnet", "/app/Kubernator.Web.dll"]` +
+  `CMD ["--bind=0.0.0.0:5050"]` so the image is secure-by-default (refuses to bind
+  non-loopback without `--trust-proxy-headers=true` or an explicit
+  `--allow-insecure-network=true`, same as running the binary directly). The sample
+  `deploy/k8s/web/deployment.yaml` still opts in via its own visible `args:` — that's an
+  explicit, editable choice in a manifest with no bundled Ingress/TLS termination, not a
+  hidden default.
 - [ ] **No Podman implementation** — `IContainerEngine` is engine-agnostic but only
   `DockerEngine` exists in `Kubernator.Runtime`. Podman is a common ask in air-gapped/
   enterprise environments that avoid Docker.
@@ -59,11 +70,17 @@ Not committed to any release; pick items up as needed.
   small SQLite-backed queue with N workers.
 - [ ] **Test gaps** — no test coverage for `Jobs/`, `Services/BuildPipeline.cs`, or the
   Blazor `Components/` pages.
-- [ ] **Serilog configuration duplication** — `Kubernator.Web/Program.cs` configures the
-  bootstrap logger and the full logger separately with overlapping settings, and none of
-  it lives in `appsettings.json`.
-- [ ] **NU1903 NuGet audit warning on `Kubernator.Web`** — `SQLitePCLRaw.lib.e_sqlite3`
-  2.1.11 (transitive via `Microsoft.Data.Sqlite`) is flagged with a known high-severity
-  advisory, which fails the build under this repo's `TreatWarningsAsErrors=true`. Worked
-  around locally with `--property:NuGetAudit=false`; needs an upstream package bump or an
-  explicit suppression if it doesn't resolve on its own.
+- [x] **Serilog configuration duplication** — minimum levels/overrides and enrichers now
+  live in `appsettings.json`'s `Serilog` section and are picked up by both loggers via
+  `.ReadFrom.Configuration(...)` (the bootstrap logger builds a small standalone
+  `IConfiguration` from `appsettings.json` + env vars before `WebApplication.CreateBuilder`
+  runs). The two sinks (console + rolling compact-JSON file, whose path depends on
+  `KUBERNATOR_HOME` and can't be a static JSON value) are now a single shared
+  `ApplyKubernatorSinks()` extension in `Logging/SerilogSinks.cs` instead of two
+  copy-pasted `WriteTo` blocks.
+- [x] **NU1903 NuGet audit warning on `Kubernator.Web`** — `SQLitePCLRaw.lib.e_sqlite3`
+  2.1.11 (transitive via `Microsoft.Data.Sqlite`) was flagged with a known high-severity
+  advisory (GHSA-2m69-gcr7-jv3q / CVE-2025-6965, fixed upstream in SQLite 3.50.2+).
+  `Directory.Packages.props` now pins the `SQLitePCLRaw.*` family to `3.0.3` (outside the
+  vulnerable `<= 2.1.11` range) via central transitive pinning; `dotnet build`/`test` no
+  longer need `--property:NuGetAudit=false`.

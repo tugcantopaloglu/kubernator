@@ -1,17 +1,24 @@
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using Kubernator.Core.AirGapped;
 using Kubernator.Core.ClusterProvisioning.Distros;
+using Kubernator.Core.ClusterProvisioning.Distros.Kubeadm;
+using Kubernator.Core.Containers;
 
 namespace Kubernator.Core.ClusterProvisioning.Artifacts;
 
 public sealed class ClusterArtifactBundleService : IClusterArtifactBundleService
 {
     private readonly HttpClient http;
+    private readonly IImageBundleService imageBundleService;
+    private readonly IContainerEngineProvider containerEngineProvider;
 
-    public ClusterArtifactBundleService(HttpClient http)
+    public ClusterArtifactBundleService(HttpClient http, IImageBundleService imageBundleService, IContainerEngineProvider containerEngineProvider)
     {
         this.http = http;
+        this.imageBundleService = imageBundleService;
+        this.containerEngineProvider = containerEngineProvider;
     }
 
     internal sealed record DownloadItem
@@ -76,6 +83,37 @@ public sealed class ClusterArtifactBundleService : IClusterArtifactBundleService
             });
         }
 
+        if (options.Distro == DistroKind.KubeadmNative)
+        {
+            var kubeVersion = options.Version.Split('+', 2)[0];
+            var images = KubeadmImageCatalog.ImagesFor(kubeVersion);
+            var engine = await containerEngineProvider.ResolveAsync(ct);
+
+            foreach (var arch in options.Architectures)
+            {
+                progress?.Report($"pulling container images for {arch}");
+                var imagesRelativeDir = $"images/{arch}";
+                var bundleResult = await imageBundleService.PullAsync(new ImageBundleOptions
+                {
+                    References = images,
+                    OutputDirectory = Path.Combine(options.OutputDirectory, imagesRelativeDir.Replace('/', Path.DirectorySeparatorChar)),
+                    Platform = $"linux/{arch}"
+                }, engine, progress, ct);
+
+                foreach (var image in bundleResult.Manifest.Images)
+                {
+                    entries.Add(new ClusterArtifactEntry
+                    {
+                        Kind = "container-image",
+                        Arch = arch,
+                        RelativePath = $"{imagesRelativeDir}/{image.TarRelativePath}",
+                        SizeBytes = image.SizeBytes,
+                        Sha256 = image.Sha256
+                    });
+                }
+            }
+        }
+
         return new ClusterArtifactManifest
         {
             Distro = options.Distro.ToString().ToLowerInvariant(),
@@ -134,6 +172,9 @@ public sealed class ClusterArtifactBundleService : IClusterArtifactBundleService
                 break;
             case DistroKind.K3s:
                 BuildK3sPlan(options, items);
+                break;
+            case DistroKind.KubeadmNative:
+                BuildKubeadmPlan(options, items);
                 break;
             default:
                 throw new NotSupportedException($"pulling artifacts for distro '{options.Distro}' is not supported");
@@ -274,6 +315,77 @@ public sealed class ClusterArtifactBundleService : IClusterArtifactBundleService
                     Required = false
                 });
             }
+        }
+    }
+
+    private static void BuildKubeadmPlan(ClusterArtifactPullOptions options, List<DownloadItem> items)
+    {
+        const string containerdVersion = "1.7.22";
+        const string runcVersion = "1.1.14";
+        const string cniPluginsVersion = "1.5.1";
+        var kubeVersion = options.Version.Split('+', 2)[0];
+
+        items.Add(new DownloadItem
+        {
+            Url = $"https://raw.githubusercontent.com/flannel-io/flannel/{options.FlannelVersion}/Documentation/kube-flannel.yml",
+            RelativePath = "cni/flannel.yaml",
+            Kind = "cni-manifest"
+        });
+        items.Add(new DownloadItem
+        {
+            Url = $"https://raw.githubusercontent.com/projectcalico/calico/{options.CalicoVersion}/manifests/calico.yaml",
+            RelativePath = "cni/calico.yaml",
+            Kind = "cni-manifest"
+        });
+
+        foreach (var arch in options.Architectures)
+        {
+            items.Add(new DownloadItem
+            {
+                Url = $"https://dl.k8s.io/release/{kubeVersion}/bin/linux/{arch}/kubeadm",
+                RelativePath = $"artifacts/{arch}/kubeadm",
+                Kind = "kubeadm-binary",
+                Arch = arch,
+                Executable = true
+            });
+            items.Add(new DownloadItem
+            {
+                Url = $"https://dl.k8s.io/release/{kubeVersion}/bin/linux/{arch}/kubelet",
+                RelativePath = $"artifacts/{arch}/kubelet",
+                Kind = "kubelet-binary",
+                Arch = arch,
+                Executable = true
+            });
+            items.Add(new DownloadItem
+            {
+                Url = $"https://dl.k8s.io/release/{kubeVersion}/bin/linux/{arch}/kubectl",
+                RelativePath = $"artifacts/{arch}/kubectl",
+                Kind = "kubectl-binary",
+                Arch = arch,
+                Executable = true
+            });
+            items.Add(new DownloadItem
+            {
+                Url = $"https://github.com/containerd/containerd/releases/download/v{containerdVersion}/containerd-{containerdVersion}-linux-{arch}.tar.gz",
+                RelativePath = $"artifacts/{arch}/containerd-{containerdVersion}-linux-{arch}.tar.gz",
+                Kind = "containerd",
+                Arch = arch
+            });
+            items.Add(new DownloadItem
+            {
+                Url = $"https://github.com/opencontainers/runc/releases/download/v{runcVersion}/runc.{arch}",
+                RelativePath = $"artifacts/{arch}/runc.{arch}",
+                Kind = "runc",
+                Arch = arch,
+                Executable = true
+            });
+            items.Add(new DownloadItem
+            {
+                Url = $"https://github.com/containernetworking/plugins/releases/download/v{cniPluginsVersion}/cni-plugins-linux-{arch}-v{cniPluginsVersion}.tgz",
+                RelativePath = $"artifacts/{arch}/cni-plugins-linux-{arch}-v{cniPluginsVersion}.tgz",
+                Kind = "cni-plugins",
+                Arch = arch
+            });
         }
     }
 

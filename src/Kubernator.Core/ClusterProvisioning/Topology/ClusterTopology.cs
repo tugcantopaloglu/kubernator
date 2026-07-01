@@ -46,4 +46,7 @@ public static class ClusterTopologyJson
     }
 
     public static string Serialize(ClusterTopology topology) => JsonSerializer.Serialize(topology, Options);
+
+    public static async Task SaveAsync(string path, ClusterTopology topology, CancellationToken ct = default) =>
+        await File.WriteAllTextAsync(path, Serialize(topology), ct);
 }

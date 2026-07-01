@@ -44,9 +44,9 @@ public sealed class ClusterController : ControllerBase
         {
             throw ApiException.BadRequest($"unsupported distro: {request.Distro}");
         }
-        if (distro is not (DistroKind.Rke2 or DistroKind.K3s))
+        if (distro is not (DistroKind.Rke2 or DistroKind.K3s or DistroKind.KubeadmNative))
         {
-            throw ApiException.BadRequest($"pulling artifacts for distro '{distro}' is not implemented yet — only 'rke2' and 'k3s' are supported");
+            throw ApiException.BadRequest($"pulling artifacts for distro '{distro}' is not implemented yet — only 'rke2', 'k3s', and 'kubeadm' are supported");
         }
 
         var keyId = User.FindFirst(ApiKeyScopes.KeyIdClaimType)?.Value;
