@@ -1,12 +1,16 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Kubernator.Core.Security;
 
 namespace Kubernator.Core.Vault;
 
 public sealed class FileKeyVault : IKeyVault, IDisposable
 {
+    private const string DecryptedCacheDirectoryName = ".cache";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -14,13 +18,19 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
     };
 
     private readonly string indexPath;
+    private readonly string cacheDirectory;
     private readonly SemaphoreSlim mutex = new(1, 1);
+    private readonly SecretProtector protector;
+    private readonly ConcurrentDictionary<string, string> decryptedCache = new(StringComparer.Ordinal);
 
     public FileKeyVault(string rootDirectory)
     {
         RootDirectory = Path.GetFullPath(rootDirectory);
         Directory.CreateDirectory(RootDirectory);
         indexPath = Path.Combine(RootDirectory, "index.json");
+        cacheDirectory = Path.Combine(RootDirectory, DecryptedCacheDirectoryName);
+        protector = new SecretProtector(RootDirectory, "kubernator-vault-v1", "vault.kek", "KUBERNATOR_VAULT_KEY");
+        try { Directory.Delete(cacheDirectory, recursive: true); } catch { }
     }
 
     public static FileKeyVault Default()
@@ -63,7 +73,22 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
     public async Task<string> ResolvePathAsync(string id, CancellationToken ct = default)
     {
         var entry = await GetAsync(id, ct) ?? throw new InvalidOperationException($"vault entry '{id}' not found");
-        return Path.Combine(RootDirectory, entry.FileName);
+
+        if (decryptedCache.TryGetValue(id, out var cached) && File.Exists(cached))
+        {
+            return cached;
+        }
+
+        var encryptedPath = Path.Combine(RootDirectory, entry.FileName);
+        var plaintext = protector.Unprotect(await File.ReadAllBytesAsync(encryptedPath, ct));
+
+        Directory.CreateDirectory(cacheDirectory);
+        var decryptedPath = Path.Combine(cacheDirectory, entry.FileName);
+        await File.WriteAllBytesAsync(decryptedPath, plaintext, ct);
+        TryRestrictPermissions(decryptedPath);
+
+        decryptedCache[id] = decryptedPath;
+        return decryptedPath;
     }
 
     public Task<VaultEntry> ImportFromFileAsync(string name, VaultEntryKind kind, string sourcePath, bool encrypted, CancellationToken ct = default)
@@ -98,11 +123,11 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
             };
             var fileName = $"{id}{ext}";
             var fullPath = Path.Combine(RootDirectory, fileName);
-
-            await File.WriteAllBytesAsync(fullPath, contents.ToArray(), ct);
-            TryRestrictPermissions(fullPath);
-
             var fingerprint = ComputeFingerprint(contents.Span);
+
+            var ciphertext = protector.Protect(contents.ToArray());
+            await File.WriteAllBytesAsync(fullPath, ciphertext, ct);
+            TryRestrictPermissions(fullPath);
             var entry = new VaultEntry
             {
                 Id = id,
@@ -142,6 +167,7 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
             {
                 File.Delete(fullPath);
             }
+            EvictDecryptedCache(id);
 
             var remaining = index.Entries.Where(e => e.Id != id).ToList();
             await SaveIndexAsync(new IndexFile { Entries = remaining }, ct);
@@ -208,7 +234,22 @@ public sealed class FileKeyVault : IKeyVault, IDisposable
         }
     }
 
-    public void Dispose() => mutex.Dispose();
+    private void EvictDecryptedCache(string id)
+    {
+        if (decryptedCache.TryRemove(id, out var cached))
+        {
+            try { File.Delete(cached); } catch { }
+        }
+    }
+
+    public void Dispose()
+    {
+        foreach (var id in decryptedCache.Keys.ToList())
+        {
+            EvictDecryptedCache(id);
+        }
+        mutex.Dispose();
+    }
 
     private sealed class IndexFile
     {

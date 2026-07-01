@@ -71,4 +71,53 @@ public sealed class FileKeyVaultTests : IDisposable
         await Assert.ThrowsAsync<ArgumentException>(
             () => sut.ImportFromBytesAsync("name", VaultEntryKind.PublicKey, Array.Empty<byte>(), false));
     }
+
+    [Fact]
+    public async Task Entry_is_stored_encrypted_at_rest()
+    {
+        var pem = Encoding.UTF8.GetBytes("-----BEGIN PRIVATE KEY-----\nsecret-material\n-----END PRIVATE KEY-----");
+        var entry = await sut.ImportFromBytesAsync("k", VaultEntryKind.PrivateKey, pem, encrypted: false);
+
+        var rawOnDisk = File.ReadAllBytes(Path.Combine(tempDir, entry.FileName));
+
+        rawOnDisk.Should().NotBeEquivalentTo(pem);
+        Encoding.UTF8.GetString(rawOnDisk).Should().NotContain("secret-material");
+    }
+
+    [Fact]
+    public async Task Resolved_path_decrypts_to_original_content_and_is_cached()
+    {
+        var pem = Encoding.UTF8.GetBytes("plaintext-payload");
+        var entry = await sut.ImportFromBytesAsync("k", VaultEntryKind.PrivateKey, pem, encrypted: false);
+
+        var first = await sut.ResolvePathAsync(entry.Id);
+        var second = await sut.ResolvePathAsync(entry.Id);
+
+        first.Should().Be(second);
+        File.ReadAllBytes(first).Should().BeEquivalentTo(pem);
+    }
+
+    [Fact]
+    public async Task Remove_entry_also_clears_decrypted_cache_file()
+    {
+        var pem = Encoding.UTF8.GetBytes("cache-me");
+        var entry = await sut.ImportFromBytesAsync("k", VaultEntryKind.PrivateKey, pem, encrypted: false);
+        var decryptedPath = await sut.ResolvePathAsync(entry.Id);
+
+        await sut.RemoveAsync(entry.Id);
+
+        File.Exists(decryptedPath).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Second_vault_instance_at_same_root_can_decrypt_existing_entries()
+    {
+        var pem = Encoding.UTF8.GetBytes("shared-root-secret");
+        var entry = await sut.ImportFromBytesAsync("k", VaultEntryKind.PrivateKey, pem, encrypted: false);
+
+        using var other = new FileKeyVault(tempDir);
+        var path = await other.ResolvePathAsync(entry.Id);
+
+        File.ReadAllBytes(path).Should().BeEquivalentTo(pem);
+    }
 }

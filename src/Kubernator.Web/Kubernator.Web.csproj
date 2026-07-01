@@ -10,7 +10,6 @@
   <ItemGroup>
     <PackageReference Include="QRCoder" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Serilog.Sinks.File" />

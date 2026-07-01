@@ -1,24 +1,26 @@
 using System.Security.Cryptography;
+using System.Text;
 
-namespace Kubernator.Web.Auth;
+namespace Kubernator.Core.Security;
 
 public sealed class SecretProtector
 {
     private const int NonceSize = 12;
     private const int TagSize = 16;
     private const int KekSize = 32;
-    private const string DpapiTag = "kubernator-totp-v1";
 
+    private readonly string dpapiTag;
     private readonly byte[]? unixKek;
 
-    public SecretProtector(string authDirectory)
+    public SecretProtector(string directory, string purpose, string kekFileName, string envVarName)
     {
+        dpapiTag = purpose;
         if (OperatingSystem.IsWindows())
         {
             return;
         }
 
-        var envKey = Environment.GetEnvironmentVariable("KUBERNATOR_SECRET_KEY");
+        var envKey = Environment.GetEnvironmentVariable(envVarName);
         if (!string.IsNullOrEmpty(envKey))
         {
             try
@@ -27,18 +29,18 @@ public sealed class SecretProtector
                 if (bytes.Length != KekSize)
                 {
                     throw new InvalidOperationException(
-                        $"KUBERNATOR_SECRET_KEY must be base64 of {KekSize} bytes; got {bytes.Length}");
+                        $"{envVarName} must be base64 of {KekSize} bytes; got {bytes.Length}");
                 }
                 unixKek = bytes;
                 return;
             }
             catch (FormatException)
             {
-                throw new InvalidOperationException("KUBERNATOR_SECRET_KEY is not valid base64");
+                throw new InvalidOperationException($"{envVarName} is not valid base64");
             }
         }
 
-        var kekPath = Path.Combine(authDirectory, ".kek");
+        var kekPath = Path.Combine(directory, kekFileName);
         if (File.Exists(kekPath))
         {
             unixKek = File.ReadAllBytes(kekPath);
@@ -50,7 +52,7 @@ public sealed class SecretProtector
             return;
         }
 
-        Directory.CreateDirectory(authDirectory);
+        Directory.CreateDirectory(directory);
         unixKek = RandomNumberGenerator.GetBytes(KekSize);
         File.WriteAllBytes(kekPath, unixKek);
         try { File.SetUnixFileMode(kekPath, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
@@ -104,16 +106,16 @@ public sealed class SecretProtector
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static byte[] DpapiProtect(byte[] plaintext)
-        => System.Security.Cryptography.ProtectedData.Protect(
+    private byte[] DpapiProtect(byte[] plaintext)
+        => ProtectedData.Protect(
             plaintext,
-            System.Text.Encoding.UTF8.GetBytes(DpapiTag),
-            System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            Encoding.UTF8.GetBytes(dpapiTag),
+            DataProtectionScope.CurrentUser);
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-    private static byte[] DpapiUnprotect(byte[] envelope)
-        => System.Security.Cryptography.ProtectedData.Unprotect(
+    private byte[] DpapiUnprotect(byte[] envelope)
+        => ProtectedData.Unprotect(
             envelope,
-            System.Text.Encoding.UTF8.GetBytes(DpapiTag),
-            System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            Encoding.UTF8.GetBytes(dpapiTag),
+            DataProtectionScope.CurrentUser);
 }

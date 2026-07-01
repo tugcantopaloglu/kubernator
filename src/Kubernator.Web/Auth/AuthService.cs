@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Security.Cryptography;
+using Kubernator.Core.Security;
 using Microsoft.Data.Sqlite;
 
 namespace Kubernator.Web.Auth;
@@ -69,7 +70,7 @@ public sealed class AuthService : IDisposable
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = true
         }.ToString();
-        protector = new SecretProtector(dir);
+        protector = new SecretProtector(dir, "kubernator-totp-v1", ".kek", "KUBERNATOR_SECRET_KEY");
         InitializeSchema();
         TightenDbFilePermissions(dbPath);
     }

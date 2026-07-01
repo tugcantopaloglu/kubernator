@@ -15,11 +15,15 @@ Not committed to any release; pick items up as needed.
 - [ ] **k3s HA follow-through** — HA path for k3s is wired (`cluster-init`, `tls-san`,
   shared `ApiServerPort`/`JoinPort` model) but has not been exercised against a real
   multi-node k3s cluster; RKE2 side is the one the abstractions were validated against.
-- [ ] **Real encryption-at-rest for vault entries** — `FileKeyVault`'s `Encrypted` flag
-  on a `VaultEntry` is metadata only; nothing actually encrypts the file. This affects
-  every vault-held secret, not just the new `VaultEntryKind.SshPrivateKey` entries added
-  for node credentials — SSH private keys currently get the same file-permission-only
-  protection as everything else in the vault.
+- [x] **Real encryption-at-rest for vault entries** — `FileKeyVault` now encrypts every
+  entry at rest with AES-256-GCM (DPAPI-wrapped on Windows) via a shared `SecretProtector`
+  (moved to `Kubernator.Core.Security`, also used by the web auth TOTP secrets). The
+  key-encryption-key is either sourced from `KUBERNATOR_VAULT_KEY` (base64, 32 bytes) or
+  persisted alongside the vault as `vault.kek`. `ResolvePathAsync` decrypts on demand into
+  a per-id cache file under `<vault>/.cache/`, which is purged on `RemoveAsync`, on
+  `Dispose()`, and at startup (in case a prior process crashed before cleaning up). The
+  `Encrypted` flag on `VaultEntry` is unchanged and still just describes whether the
+  stored content itself (e.g. a PEM) is passphrase-protected.
 - [ ] **RKE2/k3s version comparison** — `ClusterUpgradePlanner` treats "current version"
   as exact-string-equality only (no semver-with-build-suffix ordering, no downgrade
   protection). Fine for "skip if already current"; would need real ordering if
