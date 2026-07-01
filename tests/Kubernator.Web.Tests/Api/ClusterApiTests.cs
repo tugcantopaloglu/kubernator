@@ -45,7 +45,7 @@ public sealed class ClusterApiTests
         var response = await client.PostAsJsonAsync("/api/v1/cluster/pull", new
         {
             outputDirectory = TestUtil.TempDir(),
-            distro = "kubeadm-native",
+            distro = "not-a-real-distro",
             version = "v1.30.4+rke2r1",
             architectures = Amd64Only
         });

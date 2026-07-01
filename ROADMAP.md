@@ -6,15 +6,39 @@ Not committed to any release; pick items up as needed.
 
 ## Cluster provisioning — remaining distro/security work
 
-- [ ] **kubeadm-native distro plugin** — third `IClusterDistroProvisioner` implementation.
-  Unlike RKE2/k3s (single vendor-provided installer + bundled containerd), this needs
-  separate offline packaging for containerd, a CNI plugin, etcd, and the
-  kubelet/kubeadm/kubectl binaries, plus `kubeadm init`/`kubeadm join` orchestration
-  and manual HA bootstrap (`--control-plane` join, certs distribution). Meaningfully
-  more work than RKE2/k3s were.
-- [ ] **k3s HA follow-through** — HA path for k3s is wired (`cluster-init`, `tls-san`,
-  shared `ApiServerPort`/`JoinPort` model) but has not been exercised against a real
-  multi-node k3s cluster; RKE2 side is the one the abstractions were validated against.
+- [x] **kubeadm-native distro plugin** — `KubeadmDistroProvisioner` added under
+  `ClusterProvisioning/Distros/Kubeadm/`. Offline packaging: `ClusterArtifactBundleService`
+  gained a kubeadm `BuildDownloadPlan` branch (containerd/runc/CNI-plugins/kubeadm/
+  kubelet/kubectl binaries + both Flannel and Calico manifests, since the topology's CNI
+  choice isn't known at pull time) and reuses the existing airgap image-bundling
+  (`IImageBundleService`/`IContainerEngine`) to pull+export the `registry.k8s.io` images a
+  new `KubeadmImageCatalog` table lists per k8s minor, imported on nodes via
+  `ctr -n k8s.io images import`. `ClusterTopology.CniPlugin` must be `"flannel"` or
+  `"calico"` for kubeadm topologies (validator-enforced — no silent default). The
+  interface's single opaque `Token` string (designed around RKE2/k3s's shared-secret
+  model) carries kubeadm's three distinct join values (bootstrap token, CA-cert-hash,
+  control-plane certificate-key) via a `|`-delimited `KubeadmJoinToken` encode/decode,
+  entirely internal to the provisioner — no changes to `IClusterDistroProvisioner` or
+  `ClusterProvisioningService`. **Known open risk**: `UpgradeNodeAsync`'s signature only
+  carries `NodeRole`, not `IsInitServer`, so it can't be told which control-plane node
+  should run `kubeadm upgrade apply` (once, cluster-wide) vs `kubeadm upgrade node`
+  (everywhere else); implemented as a self-detecting heuristic (checks whether any node's
+  reported `kubeletVersion` already matches the target) rather than an interface change —
+  works for the sequential-upgrade-order this codebase uses today, but is worth revisiting
+  if that ordering assumption ever changes. Calico ships BGP-mode only (no VXLAN), and pod
+  CIDR is hardcoded to Flannel's default (`10.244.0.0/16`) for both CNIs pending a
+  `PodCidr` topology field. Kubeadm's own image/version tables need periodic manual
+  updates as new Kubernetes minors are supported, same maintenance shape as RKE2/k3s's
+  hardcoded per-version URLs.
+- [x] **k3s HA follow-through** — code review found no structural bugs in the existing
+  k3s HA wiring (`cluster-init`/`tls-san`/shared `ApiServerPort`/`JoinPort` abstractions
+  are applied identically to RKE2's, just with `JoinPort` collapsed to the same `6443` as
+  `ApiServerPort`). Since a real multi-node k3s cluster can't be provisioned here, "done"
+  for this pass means test coverage: a `ClusterProvisioningServiceTests` case mirrors the
+  existing RKE2 HA sequencing test with `DistroKind.K3s`, and a new
+  `K3sDistroProvisionerTests.cs` (the first direct test of either RKE2/k3s provisioner,
+  not just their config templates) asserts the exact remote config content and commands
+  for first-server bootstrap, additional-server join, and agent join.
 - [x] **Real encryption-at-rest for vault entries** — `FileKeyVault` now encrypts every
   entry at rest with AES-256-GCM (DPAPI-wrapped on Windows) via a shared `SecretProtector`
   (moved to `Kubernator.Core.Security`, also used by the web auth TOTP secrets). The
@@ -24,17 +48,41 @@ Not committed to any release; pick items up as needed.
   `Dispose()`, and at startup (in case a prior process crashed before cleaning up). The
   `Encrypted` flag on `VaultEntry` is unchanged and still just describes whether the
   stored content itself (e.g. a PEM) is passphrase-protected.
-- [ ] **RKE2/k3s version comparison** — `ClusterUpgradePlanner` treats "current version"
-  as exact-string-equality only (no semver-with-build-suffix ordering, no downgrade
-  protection). Fine for "skip if already current"; would need real ordering if
-  downgrade prevention is ever required.
-- [ ] **`cluster discover`** — build a `ClusterTopology` from a live cluster's kubeconfig
-  instead of requiring a hand-written topology JSON file. Non-trivial: needs to reverse-map
-  Kubernetes nodes back to SSH-reachable hosts.
-- [ ] **Web Jobs UI polish** — `Cluster.razor` uses the same in-page `Progress<string>`
-  pattern as `Build.razor`/`Deploy.razor` (log disappears if the page is left); the
-  REST API's job-queue path (`ClusterController`) already streams progress into
-  `IJobManager`, so a jobs-polling UI is possible later without touching Core.
+- [x] **RKE2/k3s version comparison** — new `DistroVersion`/`DistroVersionComparer`
+  (`ClusterProvisioning/Upgrade/DistroVersion.cs`) parses `v<major>.<minor>.<patch>
+  [-prerelease][+build]`, comparing the numeric core first and treating a same-core,
+  different-build-suffix pair (e.g. `rke2r1` → `rke2r2`) as still needing a reinstall.
+  Falls back to ordinal string comparison for anything that doesn't parse (kept
+  deliberately lenient, not stricter, so it can't start throwing on unexpected input).
+  `ClusterUpgradePlanner`'s `needsUpgrade` now calls this instead of raw `string.Equals`.
+  This is ordering, not a downgrade guard — `DistroVersion.CompareCoreTo` is exposed as
+  the primitive a future downgrade-prevention pass would use, per the original scoping.
+- [x] **`cluster discover`** (CLI only this pass) — new `ClusterTopologyDiscoverer` in
+  Core shells `kubectl get nodes -o json` (via the existing `IProcessRunner`, deliberately
+  kept separate from `KubectlClusterMonitor`/`NodeStatus` to avoid touching that shared
+  contract) and reverse-maps nodes to a best-effort `ClusterTopology`: `node-role.
+  kubernetes.io/control-plane`/`master` labels → `NodeRole.Server` else `Agent`, each
+  node's InternalIP (falling back to ExternalIP, then node name) → `NodeConnection.Host`,
+  one shared SSH identity applied to every node from CLI flags (no per-node signal exists
+  for credentials), and the oldest server by `creationTimestamp` chosen as `IsInitServer`
+  (documented heuristic — nothing post-bootstrap identifies "the" init server). Runs the
+  result through the existing `ClusterTopologyValidator` and surfaces warnings/errors
+  rather than throwing, since fields like `FixedRegistrationAddresses` and
+  `LocalArtifactBundlePath` have no cluster-side signal at all and are expected gaps for
+  the operator to fill in. New `kubernator cluster discover` CLI action; Web UI/API parity
+  intentionally deferred to a future pass.
+- [x] **Web Jobs UI polish** — `Cluster.razor`'s pull/install/upgrade/status actions now
+  go through `IJobManager` (the same job-queue path `ClusterController`'s REST endpoints
+  already used) instead of an in-page `Progress<string>`, via a new reusable
+  `JobProgressPanel.razor` component that polls `IJobManager.Get(id)` on a 1s
+  `PeriodicTimer` and cleans itself up (`IAsyncDisposable`) regardless of whether the page
+  is left mid-job. Progress now lives in server-side `JobState`, independent of the
+  Blazor circuit. First jobs-polling UI pattern in this codebase (no prior art existed);
+  scoped to this one page only, not the other 8 pages still using the old pattern. No
+  automated test coverage added (this repo has zero Blazor component tests) — verified by
+  building (Razor codegen catches most binding/type errors) and booting the app; a full
+  interactive click-through wasn't possible in the session that made this change (no
+  connected browser) and is worth a manual spot-check.
 
 ## Pre-existing codebase backlog (unrelated to cluster provisioning)
 
@@ -61,9 +109,23 @@ Not committed to any release; pick items up as needed.
   `deploy/k8s/web/deployment.yaml` still opts in via its own visible `args:` — that's an
   explicit, editable choice in a manifest with no bundled Ingress/TLS termination, not a
   hidden default.
-- [ ] **No Podman implementation** — `IContainerEngine` is engine-agnostic but only
-  `DockerEngine` exists in `Kubernator.Runtime`. Podman is a common ask in air-gapped/
-  enterprise environments that avoid Docker.
+- [x] **No Podman implementation** — added `PodmanEngine`/`PodmanEngineProvider` under
+  the new `Kubernator.Runtime/Podman/`, reusing `Docker.DotNet` against Podman's own
+  Docker-API-compatible socket (`CONTAINER_HOST`, else `unix:///run/user/$UID/podman/
+  podman.sock` → `unix:///run/podman/podman.sock` on Linux/macOS, the `podman-machine-
+  default` named pipe on Windows) rather than reimplementing image build/pull/push/save
+  against the Podman CLI. `PodmanEngine` wraps a `DockerEngine` and corrects the one field
+  (`EngineInfo.Name`) that would otherwise still read `"docker"`. A new
+  `ContainerEngineSelector` (now the `IContainerEngineProvider` registered by
+  `AddKubernatorRuntime()`) tries Docker then Podman by default, or pins to one via
+  `KUBERNATOR_CONTAINER_ENGINE=docker|podman`; none of the five existing CLI/Web call
+  sites (`Build`/`Bundle`/`Pull`/`Rehost`/`Validate`) needed any changes since they were
+  already coded against `IContainerEngineProvider`, not `DockerEngineProvider` directly.
+  Also stood up the `Kubernator.Runtime.Tests` project (its `InternalsVisibleTo` entry
+  already existed in `Kubernator.Runtime.csproj` but the project itself was never
+  created) with tests for the selector's dispatch logic; `DockerEngine`/`PodmanEngine`
+  themselves still have no tests since neither is mockable without a real daemon, the
+  same pre-existing gap `DockerEngine`/`BuildxEngine` already had.
 - [ ] **`Kubernator.Web` Jobs system is in-memory and single-worker** — `InMemoryJobManager`
   loses all state on restart and `JobBackgroundRunner` processes one job at a time, so a
   long `bundle`/`build`/`cluster install` job blocks every other submitted job. Consider a

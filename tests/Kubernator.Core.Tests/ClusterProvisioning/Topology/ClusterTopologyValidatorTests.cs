@@ -166,6 +166,60 @@ public sealed class ClusterTopologyValidatorTests
     }
 
     [Fact]
+    public void Kubeadm_topology_with_default_canal_cni_is_invalid()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Errors.Should().Contain(e => e.Contains("cniPlugin") && e.Contains("flannel"));
+    }
+
+    [Theory]
+    [InlineData("flannel")]
+    [InlineData("calico")]
+    public void Kubeadm_topology_with_flannel_or_calico_cni_is_valid(string cniPlugin)
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            CniPlugin = cniPlugin,
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Ok.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Rke2_topology_is_unaffected_by_the_kubeadm_cni_rule()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.Rke2,
+            Version = "v1.30.4+rke2r1",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Ok.Should().BeTrue();
+    }
+
+    [Fact]
     public void Ssh_node_without_host_is_an_error()
     {
         var topology = new ClusterTopology
