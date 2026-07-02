@@ -47,10 +47,10 @@ public sealed class AdminAndScopeTests
 
         var readClient = ClientWithKey(plaintext);
 
-        var detect = await readClient.PostAsJsonAsync("/api/v1/detect", new { path = Path.GetTempPath() });
+        var detect = await readClient.PostAsJsonAsync("/api/v1/detect", new { path = TestUtil.TempDir() });
         detect.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var generate = await readClient.PostAsJsonAsync("/api/v1/generate", new { path = Path.GetTempPath() });
+        var generate = await readClient.PostAsJsonAsync("/api/v1/generate", new { path = TestUtil.TempDir() });
         generate.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
@@ -92,7 +92,7 @@ public sealed class AdminAndScopeTests
         disabledResp.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var rejected = ClientWithKey(plaintext);
-        var detect = await rejected.PostAsJsonAsync("/api/v1/detect", new { path = Path.GetTempPath() });
+        var detect = await rejected.PostAsJsonAsync("/api/v1/detect", new { path = TestUtil.TempDir() });
         detect.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 

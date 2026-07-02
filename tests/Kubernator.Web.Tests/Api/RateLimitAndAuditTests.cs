@@ -35,10 +35,11 @@ public sealed class RateLimitAndAuditTests
         var probe = factory.CreateClient();
         probe.DefaultRequestHeaders.Add(ApiKeyOptions.HeaderName, plaintext);
 
+        var scanDir = TestUtil.TempDir();
         HttpResponseMessage? rejected = null;
         for (var i = 0; i < 8; i++)
         {
-            var resp = await probe.PostAsJsonAsync("/api/v1/detect", new { path = Path.GetTempPath() });
+            var resp = await probe.PostAsJsonAsync("/api/v1/detect", new { path = scanDir });
             if (resp.StatusCode == HttpStatusCode.TooManyRequests)
             {
                 rejected = resp;
