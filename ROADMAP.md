@@ -130,8 +130,20 @@ Not committed to any release; pick items up as needed.
   loses all state on restart and `JobBackgroundRunner` processes one job at a time, so a
   long `bundle`/`build`/`cluster install` job blocks every other submitted job. Consider a
   small SQLite-backed queue with N workers.
-- [ ] **Test gaps** — no test coverage for `Jobs/`, `Services/BuildPipeline.cs`, or the
-  Blazor `Components/` pages.
+- [x] **Test gaps (`Services/BuildPipeline.cs`)** — added `BuildPipelineTests.cs`
+  (NSubstitute-mocked `IAnalysisService`/`IStrategySelector`/`IGenerationService`/
+  `IContainerEngineProvider`, first use of NSubstitute in `Kubernator.Web.Tests`), covering:
+  the `NoBuild` early return never touching the container engine; a full build staging the
+  source tree plus the generated `Dockerfile`/`.dockerignore` into `build-context/`; the
+  case where the default output directory (`<path>/.kubernator`) sits *inside* the source
+  path, which exercises `CopyDirectoryAsync`'s exclusion of `excludeRoot` — without it, the
+  build context would recursively copy itself into itself; a multi-platform request against
+  an engine that doesn't support it throwing before `BuildAsync` is ever called; and a
+  custom output directory outside the source path, which copies the source tree unfiltered
+  since there's nothing to exclude. `Jobs/` test coverage is tracked separately (a parallel
+  in-flight change); the Blazor `Components/` pages still have no test coverage — this repo
+  has no Blazor component test harness (e.g. bUnit) set up yet, which is a bigger, separate
+  lift.
 - [x] **Serilog configuration duplication** — minimum levels/overrides and enrichers now
   live in `appsettings.json`'s `Serilog` section and are picked up by both loggers via
   `.ReadFrom.Configuration(...)` (the bootstrap logger builds a small standalone
