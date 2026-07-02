@@ -25,4 +25,8 @@
     <ProjectReference Include="..\Kubernator.Runtime\Kubernator.Runtime.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kubernator.Web.Tests" />
+  </ItemGroup>
+
 </Project>

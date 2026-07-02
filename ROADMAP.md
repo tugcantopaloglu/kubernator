@@ -126,12 +126,40 @@ Not committed to any release; pick items up as needed.
   created) with tests for the selector's dispatch logic; `DockerEngine`/`PodmanEngine`
   themselves still have no tests since neither is mockable without a real daemon, the
   same pre-existing gap `DockerEngine`/`BuildxEngine` already had.
-- [ ] **`Kubernator.Web` Jobs system is in-memory and single-worker** — `InMemoryJobManager`
-  loses all state on restart and `JobBackgroundRunner` processes one job at a time, so a
-  long `bundle`/`build`/`cluster install` job blocks every other submitted job. Consider a
-  small SQLite-backed queue with N workers.
-- [ ] **Test gaps** — no test coverage for `Jobs/`, `Services/BuildPipeline.cs`, or the
-  Blazor `Components/` pages.
+- [x] **`Kubernator.Web` Jobs system is in-memory and single-worker** — replaced
+  `InMemoryJobManager`'s closure-based `JobSubmission.Work` (a `Func<...>` that can't
+  survive a restart) with `SqliteJobManager` (`Jobs/SqliteJobManager.cs`, same
+  connection-per-call + mutex pattern as `SqliteApiKeyStore`, at `KUBERNATOR_HOME/jobs/
+  jobs.db`): jobs are persisted as `(kind, payload_json)` and dispatched through a new
+  `IJobHandler`/`JobHandler<TPayload>` registry (one handler class per job kind under
+  `Jobs/Handlers/`, resolved by `Kind` string) instead of an inline lambda, so every
+  existing request DTO (`BuildRequest`, `ValidateRequest`, `BundleCreateRequest`,
+  `ClusterPullRequest`) now doubles as the durable job payload with no new shape. The
+  three cluster job kinds (`install`/`upgrade`/`status`) previously captured a pre-loaded
+  `ClusterTopology` object in the closure — switched to capturing just `TopologyPath` and
+  reloading it inside the handler at execution time, which incidentally let `Cluster.razor`
+  drop ~80 lines of duplicated inline job logic and share the same handler classes as
+  `ClusterController`. `JobBackgroundRunner` now runs `KUBERNATOR_JOB_WORKERS` (default 4)
+  concurrent workers pulling job IDs off a shared channel instead of one `await foreach`
+  loop, so a long-running job no longer blocks the queue. On startup, any job still marked
+  `Running` (the previous process died mid-execution) is reset to `Queued` and re-dispatched
+  — there's no checkpointing, so a resumed job restarts from scratch rather than resuming
+  mid-step. `JobRecord.Result`/`JobDto.Result` changed from `object?` (the live in-memory
+  DTO instance) to `JsonElement?` (deserialized from the persisted `result_json` column);
+  `Cluster.razor`'s four completion handlers now call `.Deserialize<T>(JobJson.Options)`
+  instead of an `as` cast. Added `InternalsVisibleTo` for `Kubernator.Web.Tests` (mirroring
+  the existing `Kubernator.Runtime`/`Kubernator.Runtime.Tests` pattern) so
+  `SqliteJobManagerTests.cs` can drive `JobBackgroundRunner` directly with an explicit
+  worker count and a test-only `DelegateJobHandler<T>`, covering: result persistence,
+  cancel-while-queued vs. cancel-while-running, genuine worker concurrency (a `Barrier`
+  that only releases once N workers are inside the handler simultaneously), the
+  crash-recovery requeue path, and handler-exception → `Failed` with the error captured.
+  Verified end-to-end against the real `dotnet run` binary (not just the test host): a
+  `POST /api/v1/build` job persists to `jobs.db`, executes on a worker, and the polled
+  `GET /api/v1/jobs` result JSON round-trips correctly.
+- [x] **Test gaps (Jobs/)** — closed for the `Jobs/` subsystem specifically (see above);
+  `Services/BuildPipeline.cs` and the Blazor `Components/` pages still have no test
+  coverage.
 - [x] **Serilog configuration duplication** — minimum levels/overrides and enrichers now
   live in `appsettings.json`'s `Serilog` section and are picked up by both loggers via
   `.ReadFrom.Configuration(...)` (the bootstrap logger builds a small standalone

@@ -9,6 +9,7 @@ using Kubernator.Web.Auth;
 using Kubernator.Web.Components;
 using Kubernator.Web.Downloads;
 using Kubernator.Web.Jobs;
+using Kubernator.Web.Jobs.Handlers;
 using Kubernator.Web.Logging;
 using Kubernator.Web.Services;
 using Microsoft.Extensions.Configuration;
@@ -54,8 +55,15 @@ try
     builder.Services.AddSingleton<ApiKeyRateLimitCache>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ApiKeyRateLimitCache>());
     builder.Services.AddSingleton<AuditLog>();
-    builder.Services.AddSingleton<InMemoryJobManager>();
-    builder.Services.AddSingleton<IJobManager>(sp => sp.GetRequiredService<InMemoryJobManager>());
+    builder.Services.AddSingleton<SqliteJobManager>();
+    builder.Services.AddSingleton<IJobManager>(sp => sp.GetRequiredService<SqliteJobManager>());
+    builder.Services.AddSingleton<IJobHandler, ValidateJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, BuildJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, BundleCreateJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, ClusterPullJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, ClusterInstallJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, ClusterUpgradeJobHandler>();
+    builder.Services.AddSingleton<IJobHandler, ClusterStatusJobHandler>();
     builder.Services.AddHostedService<JobBackgroundRunner>();
     builder.Services.AddSingleton<IAuthorizationHandler, ScopeRequirementHandler>();
 

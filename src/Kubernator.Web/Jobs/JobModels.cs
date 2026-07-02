@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Kubernator.Web.Jobs;
 
 public enum JobStatus
@@ -19,7 +21,7 @@ public sealed record JobRecord
     public DateTimeOffset? CompletedAt { get; init; }
     public required IReadOnlyList<JobProgressEntry> Progress { get; init; }
     public string? Error { get; init; }
-    public object? Result { get; init; }
+    public JsonElement? Result { get; init; }
     public string? KeyId { get; init; }
     public string? KeyName { get; init; }
     public TimeSpan? Duration =>
@@ -30,14 +32,6 @@ public sealed record JobProgressEntry
 {
     public required DateTimeOffset Timestamp { get; init; }
     public required string Message { get; init; }
-}
-
-public sealed record JobSubmission
-{
-    public required string Kind { get; init; }
-    public required Func<JobContext, CancellationToken, Task<object?>> Work { get; init; }
-    public string? KeyId { get; init; }
-    public string? KeyName { get; init; }
 }
 
 public sealed class JobContext

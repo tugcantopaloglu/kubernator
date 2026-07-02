@@ -4,68 +4,88 @@ namespace Kubernator.Web.Jobs;
 
 public sealed class JobBackgroundRunner : BackgroundService
 {
-    private readonly InMemoryJobManager manager;
-    private readonly ILogger<JobBackgroundRunner> logger;
+    private const int DefaultWorkerCount = 4;
 
-    public JobBackgroundRunner(IJobManager manager, ILogger<JobBackgroundRunner> logger)
+    private readonly SqliteJobManager manager;
+    private readonly IReadOnlyDictionary<string, IJobHandler> handlers;
+    private readonly ILogger<JobBackgroundRunner> logger;
+    private readonly int workerCount;
+
+    public JobBackgroundRunner(IJobManager manager, IEnumerable<IJobHandler> handlers, ILogger<JobBackgroundRunner> logger)
+        : this(manager, handlers, logger, ResolveWorkerCount())
     {
-        this.manager = (InMemoryJobManager)manager;
+    }
+
+    internal JobBackgroundRunner(IJobManager manager, IEnumerable<IJobHandler> handlers, ILogger<JobBackgroundRunner> logger, int workerCount)
+    {
+        this.manager = (SqliteJobManager)manager;
+        this.handlers = handlers.ToDictionary(h => h.Kind, StringComparer.Ordinal);
         this.logger = logger;
+        this.workerCount = workerCount;
+    }
+
+    private static int ResolveWorkerCount()
+    {
+        var raw = Environment.GetEnvironmentVariable("KUBERNATOR_JOB_WORKERS");
+        return int.TryParse(raw, out var n) && n > 0 ? n : DefaultWorkerCount;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var state in manager.Reader.ReadAllAsync(stoppingToken))
+        var workers = Enumerable.Range(0, workerCount).Select(_ => WorkerLoopAsync(stoppingToken));
+        await Task.WhenAll(workers);
+    }
+
+    private async Task WorkerLoopAsync(CancellationToken stoppingToken)
+    {
+        await foreach (var id in manager.Reader.ReadAllAsync(stoppingToken))
         {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, state.Cts.Token);
-            await RunOneAsync(state, linked.Token);
+            await RunOneAsync(id, stoppingToken);
         }
     }
 
-    private async Task RunOneAsync(JobState state, CancellationToken ct)
+    private async Task RunOneAsync(string id, CancellationToken stoppingToken)
     {
-        lock (state.Sync)
+        var execution = manager.BeginExecution(id);
+        if (execution is null)
         {
-            state.Status = JobStatus.Running;
-            state.StartedAt = DateTimeOffset.UtcNow;
+            // Job was cancelled while still queued, or vanished — nothing to run.
+            return;
         }
-        var jobCtx = new JobContext(state.Id, msg =>
+
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, execution.Cts.Token);
+        var startedAt = DateTimeOffset.UtcNow;
+        var jobCtx = new JobContext(id, msg =>
         {
-            state.AddProgress(msg);
-            logger.LogInformation("[job {Id} {Kind}] {Message}", state.Id, state.Kind, msg);
+            manager.AddProgress(id, msg);
+            logger.LogInformation("[job {Id} {Kind}] {Message}", id, execution.Kind, msg);
         });
 
         try
         {
-            var result = await state.Work(jobCtx, ct);
-            lock (state.Sync)
+            if (!handlers.TryGetValue(execution.Kind, out var handler))
             {
-                state.Status = JobStatus.Succeeded;
-                state.Result = result;
-                state.CompletedAt = DateTimeOffset.UtcNow;
+                throw new InvalidOperationException($"no handler registered for job kind '{execution.Kind}'");
             }
+
+            var result = await handler.ExecuteAsync(execution.PayloadJson, jobCtx, linked.Token);
+            manager.Complete(id, JobStatus.Succeeded, result, null);
             logger.LogInformation("job {Id} {Kind} succeeded in {Ms}ms",
-                state.Id, state.Kind, (state.CompletedAt!.Value - state.StartedAt!.Value).TotalMilliseconds);
+                id, execution.Kind, (DateTimeOffset.UtcNow - startedAt).TotalMilliseconds);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
-            lock (state.Sync)
-            {
-                state.Status = JobStatus.Cancelled;
-                state.CompletedAt = DateTimeOffset.UtcNow;
-                state.Error = "cancelled";
-            }
-            logger.LogInformation("job {Id} {Kind} cancelled", state.Id, state.Kind);
+            manager.Complete(id, JobStatus.Cancelled, null, "cancelled");
+            logger.LogInformation("job {Id} {Kind} cancelled", id, execution.Kind);
         }
         catch (Exception ex)
         {
-            lock (state.Sync)
-            {
-                state.Status = JobStatus.Failed;
-                state.CompletedAt = DateTimeOffset.UtcNow;
-                state.Error = ex.GetType().Name + ": " + ex.Message;
-            }
-            logger.LogError(ex, "job {Id} {Kind} failed", state.Id, state.Kind);
+            manager.Complete(id, JobStatus.Failed, null, ex.GetType().Name + ": " + ex.Message);
+            logger.LogError(ex, "job {Id} {Kind} failed", id, execution.Kind);
+        }
+        finally
+        {
+            manager.EndExecution(id);
         }
     }
 }

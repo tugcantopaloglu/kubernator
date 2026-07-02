@@ -1,16 +1,13 @@
 @page "/cluster"
 @rendermode InteractiveServer
-@using Kubernator.Core.ClusterProvisioning
-@using Kubernator.Core.ClusterProvisioning.Artifacts
+@using System.Text.Json
 @using Kubernator.Core.ClusterProvisioning.Distros
 @using Kubernator.Core.ClusterProvisioning.Ssh
 @using Kubernator.Core.ClusterProvisioning.Topology
-@using Kubernator.Core.ClusterProvisioning.Upgrade
 @using Kubernator.Web.Api
 @using Kubernator.Web.Components.Shared
 @using Kubernator.Web.Jobs
 @inject IJobManager Jobs
-@inject IServiceScopeFactory ScopeFactory
 
 <PageTitle>cluster · kubernator</PageTitle>
 
@@ -314,33 +311,18 @@
         var output = string.IsNullOrWhiteSpace(pullForm.OutputDirectory)
             ? Path.Combine(Environment.CurrentDirectory, "rke2-bundle")
             : Path.GetFullPath(pullForm.OutputDirectory);
-        var distro = pullForm.Distro;
-        var version = pullForm.Version;
-        var includeKubectl = pullForm.Kubectl;
-        var includeHelm = pullForm.Helm;
-        var includeK9s = pullForm.K9s;
-        var sf = ScopeFactory;
 
-        var record = Jobs.Enqueue(new JobSubmission
+        var payload = new ClusterPullRequest
         {
-            Kind = "cluster-pull",
-            Work = async (ctx, ct) =>
-            {
-                using var scope = sf.CreateScope();
-                var artifacts = scope.ServiceProvider.GetRequiredService<IClusterArtifactBundleService>();
-                var manifest = await artifacts.PullAsync(new ClusterArtifactPullOptions
-                {
-                    OutputDirectory = output,
-                    Distro = distro,
-                    Version = version,
-                    Architectures = archs,
-                    IncludeKubectl = includeKubectl,
-                    IncludeHelm = includeHelm,
-                    IncludeK9s = includeK9s
-                }, ctx.AsProgress(), ct);
-                return ClusterArtifactManifestDto.From(manifest);
-            }
-        });
+            OutputDirectory = output,
+            Distro = ClusterDistroParsing.ToWireString(pullForm.Distro),
+            Version = pullForm.Version,
+            Architectures = archs,
+            IncludeKubectl = pullForm.Kubectl,
+            IncludeHelm = pullForm.Helm,
+            IncludeK9s = pullForm.K9s
+        };
+        var record = Jobs.Enqueue("cluster-pull", payload);
         pullPanel!.Start(record.Id);
     }
 
@@ -349,7 +331,7 @@
         pullBusy = false;
         if (record.Status == JobStatus.Succeeded)
         {
-            pullManifest = record.Result as ClusterArtifactManifestDto;
+            pullManifest = record.Result?.Deserialize<ClusterArtifactManifestDto>(JobJson.Options);
         }
         else
         {
@@ -403,10 +385,10 @@
         installBusy = true;
         installResult = null;
 
-        ClusterTopology topology;
+        string topologyPath = Path.GetFullPath(installForm.TopologyPath);
         try
         {
-            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(installForm.TopologyPath));
+            await ClusterTopologyJson.LoadAsync(topologyPath);
         }
         catch (Exception ex)
         {
@@ -415,28 +397,15 @@
             return;
         }
 
-        var allowProduction = installForm.AllowProduction;
-        var sf = ScopeFactory;
-
-        var record = Jobs.Enqueue(new JobSubmission
-        {
-            Kind = "cluster-install",
-            Work = async (ctx, ct) =>
-            {
-                using var scope = sf.CreateScope();
-                var service = scope.ServiceProvider.GetRequiredService<IClusterProvisioningService>();
-                var result = await service.InstallAsync(
-                    new ClusterProvisionOptions { Topology = topology, AllowProduction = allowProduction }, ctx.AsProgress(), ct);
-                return ClusterInstallResultDto.From(result);
-            }
-        });
+        var payload = new ClusterTopologyRequest { TopologyPath = topologyPath, AllowProduction = installForm.AllowProduction };
+        var record = Jobs.Enqueue("cluster-install", payload);
         installPanel!.Start(record.Id);
     }
 
     private void OnInstallJobCompleted(JobRecord record)
     {
         installBusy = false;
-        installResult = record.Result as ClusterInstallResultDto
+        installResult = record.Result?.Deserialize<ClusterInstallResultDto>(JobJson.Options)
             ?? new ClusterInstallResultDto { Ok = false, Errors = [record.Error ?? "install failed"], CompletedSteps = [] };
         StateHasChanged();
     }
@@ -450,10 +419,10 @@
         upgradeBusy = true;
         upgradeResult = null;
 
-        ClusterTopology topology;
+        string topologyPath = Path.GetFullPath(upgradeForm.TopologyPath);
         try
         {
-            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(upgradeForm.TopologyPath));
+            await ClusterTopologyJson.LoadAsync(topologyPath);
         }
         catch (Exception ex)
         {
@@ -462,29 +431,15 @@
             return;
         }
 
-        var allowProduction = upgradeForm.AllowProduction;
-        var toVersion = upgradeForm.ToVersion;
-        var sf = ScopeFactory;
-
-        var record = Jobs.Enqueue(new JobSubmission
-        {
-            Kind = "cluster-upgrade",
-            Work = async (ctx, ct) =>
-            {
-                using var scope = sf.CreateScope();
-                var service = scope.ServiceProvider.GetRequiredService<IClusterProvisioningService>();
-                var result = await service.UpgradeAsync(
-                    new ClusterProvisionOptions { Topology = topology, AllowProduction = allowProduction }, toVersion, ctx.AsProgress(), ct);
-                return ClusterUpgradeResultDto.From(result);
-            }
-        });
+        var payload = new ClusterUpgradeRequest { TopologyPath = topologyPath, ToVersion = upgradeForm.ToVersion, AllowProduction = upgradeForm.AllowProduction };
+        var record = Jobs.Enqueue("cluster-upgrade", payload);
         upgradePanel!.Start(record.Id);
     }
 
     private void OnUpgradeJobCompleted(JobRecord record)
     {
         upgradeBusy = false;
-        upgradeResult = record.Result as ClusterUpgradeResultDto
+        upgradeResult = record.Result?.Deserialize<ClusterUpgradeResultDto>(JobJson.Options)
             ?? new ClusterUpgradeResultDto { Ok = false, Errors = [record.Error ?? "upgrade failed"], UpgradedNodes = [], SkippedNodes = [] };
         StateHasChanged();
     }
@@ -500,10 +455,10 @@
         statusResult = null;
         statusBusy = true;
 
-        ClusterTopology topology;
+        string topologyPath = Path.GetFullPath(statusForm.TopologyPath);
         try
         {
-            topology = await ClusterTopologyJson.LoadAsync(Path.GetFullPath(statusForm.TopologyPath));
+            await ClusterTopologyJson.LoadAsync(topologyPath);
         }
         catch (Exception ex)
         {
@@ -512,44 +467,8 @@
             return;
         }
 
-        var sf = ScopeFactory;
-
-        var record = Jobs.Enqueue(new JobSubmission
-        {
-            Kind = "cluster-status",
-            Work = async (ctx, ct) =>
-            {
-                using var scope = sf.CreateScope();
-                var planner = scope.ServiceProvider.GetRequiredService<ClusterUpgradePlanner>();
-                var validation = ClusterTopologyValidator.Validate(topology);
-                foreach (var warning in validation.Warnings)
-                {
-                    ctx.Report($"warning: {warning}");
-                }
-                foreach (var error in validation.Errors)
-                {
-                    ctx.Report($"error: {error}");
-                }
-
-                var plan = await planner.PlanAsync(topology, topology.Version, ct);
-                return new ClusterStatusResponse
-                {
-                    ClusterName = topology.ClusterName,
-                    TopologyOk = validation.Ok,
-                    Errors = validation.Errors,
-                    Warnings = validation.Warnings,
-                    Nodes = plan.Steps.Select(s => new ClusterNodeStatusDto
-                    {
-                        Name = s.Node.Name,
-                        Role = s.Node.Role.ToString(),
-                        Os = $"{s.Os.DistroId} {s.Os.VersionId} ({s.Os.Arch})",
-                        CurrentVersion = s.CurrentVersion,
-                        TargetVersion = s.TargetVersion,
-                        NeedsUpgrade = s.NeedsUpgrade
-                    }).ToArray()
-                };
-            }
-        });
+        var payload = new ClusterStatusRequest { TopologyPath = topologyPath };
+        var record = Jobs.Enqueue("cluster-status", payload);
         statusPanel!.Start(record.Id);
     }
 
@@ -558,7 +477,7 @@
         statusBusy = false;
         if (record.Status == JobStatus.Succeeded)
         {
-            statusResult = record.Result as ClusterStatusResponse;
+            statusResult = record.Result?.Deserialize<ClusterStatusResponse>(JobJson.Options);
         }
         else
         {
