@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Channels;
+using Kubernator.Web.Storage;
 using Microsoft.Data.Sqlite;
 
 namespace Kubernator.Web.Jobs;
@@ -25,28 +26,13 @@ public sealed class SqliteJobManager : IJobManager, IDisposable
 
     public SqliteJobManager(string dbPath)
     {
-        var dir = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-        connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = dbPath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = true
-        }.ToString();
+        connectionString = SqliteFileStore.BuildConnectionString(dbPath);
         InitializeSchema();
-        TightenPermissions(dbPath);
+        SqliteFileStore.TightenPermissions(dbPath);
         RequeueOrphanedJobs();
     }
 
-    private static string ResolveDefaultPath()
-    {
-        var home = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kubernator");
-        return Path.Combine(home, "jobs", "jobs.db");
-    }
+    private static string ResolveDefaultPath() => Path.Combine(SqliteFileStore.ResolveHome(), "jobs", "jobs.db");
 
     private void InitializeSchema()
     {
@@ -79,19 +65,7 @@ public sealed class SqliteJobManager : IJobManager, IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    private static void TightenPermissions(string path)
-    {
-        if (OperatingSystem.IsWindows() || !File.Exists(path)) return;
-        try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
-        catch { }
-    }
-
-    private SqliteConnection OpenConnection()
-    {
-        var conn = new SqliteConnection(connectionString);
-        conn.Open();
-        return conn;
-    }
+    private SqliteConnection OpenConnection() => SqliteFileStore.OpenConnection(connectionString);
 
     // Jobs still marked Running belonged to a process that died before finishing them;
     // they can't be resumed mid-flight (no checkpointing), so they go back to the front

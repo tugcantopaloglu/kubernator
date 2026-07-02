@@ -27,6 +27,22 @@ public sealed class SqliteJobManagerTests : IDisposable
         }
     }
 
+    /// <summary>Starts a JobBackgroundRunner for the duration of <paramref name="body"/> and
+    /// always stops it afterwards, even if the body throws.</summary>
+    private static async Task WithRunnerAsync(IJobManager manager, IJobHandler handler, int workerCount, Func<Task> body)
+    {
+        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount);
+        await runner.StartAsync(CancellationToken.None);
+        try
+        {
+            await body();
+        }
+        finally
+        {
+            await runner.StopAsync(CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task Enqueue_runs_the_matching_handler_and_persists_the_result()
     {
@@ -36,9 +52,8 @@ public sealed class SqliteJobManagerTests : IDisposable
             ctx.Report($"handling {payload}");
             return Task.FromResult<object?>(new EchoResult(payload));
         });
-        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: 1);
-        await runner.StartAsync(CancellationToken.None);
-        try
+
+        await WithRunnerAsync(manager, handler, workerCount: 1, async () =>
         {
             var record = manager.Enqueue("echo", "hello");
 
@@ -48,11 +63,7 @@ public sealed class SqliteJobManagerTests : IDisposable
             final.Status.Should().Be(JobStatus.Succeeded);
             final.Result!.Value.GetProperty("message").GetString().Should().Be("hello");
             final.Progress.Should().ContainSingle(p => p.Message == "handling hello");
-        }
-        finally
-        {
-            await runner.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -72,10 +83,7 @@ public sealed class SqliteJobManagerTests : IDisposable
 
         manager.Get(record.Id)!.Status.Should().Be(JobStatus.Cancelled);
 
-        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: 1);
-        await runner.StartAsync(CancellationToken.None);
-        await Task.Delay(200);
-        await runner.StopAsync(CancellationToken.None);
+        await WithRunnerAsync(manager, handler, workerCount: 1, () => Task.Delay(200));
 
         invoked.Should().Be(0);
         manager.Get(record.Id)!.Status.Should().Be(JobStatus.Cancelled);
@@ -92,9 +100,8 @@ public sealed class SqliteJobManagerTests : IDisposable
             await Task.Delay(Timeout.Infinite, ct);
             return null;
         });
-        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: 1);
-        await runner.StartAsync(CancellationToken.None);
-        try
+
+        await WithRunnerAsync(manager, handler, workerCount: 1, async () =>
         {
             var record = manager.Enqueue("slow", "x");
             await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -102,11 +109,7 @@ public sealed class SqliteJobManagerTests : IDisposable
             manager.Cancel(record.Id).Should().BeTrue();
 
             await WaitUntilAsync(() => manager.Get(record.Id)!.Status == JobStatus.Cancelled, TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            await runner.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -114,28 +117,30 @@ public sealed class SqliteJobManagerTests : IDisposable
     {
         using var manager = new SqliteJobManager(DbPath);
         const int concurrency = 3;
-        using var allEntered = new Barrier(concurrency);
-        var handler = new DelegateJobHandler<string>("parallel", (payload, ctx, ct) =>
+        var arrived = 0;
+        var allArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var handler = new DelegateJobHandler<string>("parallel", async (payload, ctx, ct) =>
         {
-            // Every worker blocks here until `concurrency` of them have arrived simultaneously.
+            // Every worker awaits here until `concurrency` of them have arrived simultaneously.
             // With one-job-at-a-time processing this would hang until the test times out.
-            allEntered.SignalAndWait(TimeSpan.FromSeconds(5), ct);
-            return Task.FromResult<object?>(null);
+            // Deliberately async (no blocking wait primitive like Barrier), so this can't starve
+            // the thread pool on CI runners with few cores.
+            if (Interlocked.Increment(ref arrived) == concurrency)
+            {
+                allArrived.TrySetResult();
+            }
+            await allArrived.Task.WaitAsync(TimeSpan.FromSeconds(5), ct);
+            return null;
         });
-        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: concurrency);
-        await runner.StartAsync(CancellationToken.None);
-        try
+
+        await WithRunnerAsync(manager, handler, workerCount: concurrency, async () =>
         {
             var ids = Enumerable.Range(0, concurrency)
                 .Select(i => manager.Enqueue("parallel", $"job-{i}").Id)
                 .ToArray();
 
             await WaitUntilAsync(() => ids.All(id => manager.Get(id)!.Status == JobStatus.Succeeded), TimeSpan.FromSeconds(10));
-        }
-        finally
-        {
-            await runner.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]
@@ -154,16 +159,9 @@ public sealed class SqliteJobManagerTests : IDisposable
         recovered.Get(jobId)!.Status.Should().Be(JobStatus.Queued, "orphaned Running jobs must be requeued on startup");
 
         var handler = new DelegateJobHandler<string>("resume-me", (payload, ctx, ct) => Task.FromResult<object?>(new EchoResult(payload)));
-        using var runner = new JobBackgroundRunner(recovered, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: 1);
-        await runner.StartAsync(CancellationToken.None);
-        try
-        {
-            await WaitUntilAsync(() => recovered.Get(jobId)!.Status == JobStatus.Succeeded, TimeSpan.FromSeconds(5));
-        }
-        finally
-        {
-            await runner.StopAsync(CancellationToken.None);
-        }
+
+        await WithRunnerAsync(recovered, handler, workerCount: 1, () =>
+            WaitUntilAsync(() => recovered.Get(jobId)!.Status == JobStatus.Succeeded, TimeSpan.FromSeconds(5)));
     }
 
     [Fact]
@@ -172,19 +170,14 @@ public sealed class SqliteJobManagerTests : IDisposable
         using var manager = new SqliteJobManager(DbPath);
         var handler = new DelegateJobHandler<string>("boom", (payload, ctx, ct) =>
             throw new InvalidOperationException("kaboom"));
-        using var runner = new JobBackgroundRunner(manager, [handler], NullLogger<JobBackgroundRunner>.Instance, workerCount: 1);
-        await runner.StartAsync(CancellationToken.None);
-        try
+
+        await WithRunnerAsync(manager, handler, workerCount: 1, async () =>
         {
             var record = manager.Enqueue("boom", "x");
             await WaitUntilAsync(() => manager.Get(record.Id)!.Status == JobStatus.Failed, TimeSpan.FromSeconds(5));
 
             manager.Get(record.Id)!.Error.Should().Contain("kaboom");
-        }
-        finally
-        {
-            await runner.StopAsync(CancellationToken.None);
-        }
+        });
     }
 
     [Fact]

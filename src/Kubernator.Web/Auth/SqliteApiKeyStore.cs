@@ -1,6 +1,7 @@
 using System.Buffers.Text;
 using System.Globalization;
 using System.Security.Cryptography;
+using Kubernator.Web.Storage;
 using Microsoft.Data.Sqlite;
 
 namespace Kubernator.Web.Auth;
@@ -19,27 +20,12 @@ public sealed class SqliteApiKeyStore : IApiKeyStore, IDisposable
 
     public SqliteApiKeyStore(string dbPath)
     {
-        var dir = Path.GetDirectoryName(dbPath);
-        if (!string.IsNullOrEmpty(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
-        connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = dbPath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
-            Pooling = true
-        }.ToString();
+        connectionString = SqliteFileStore.BuildConnectionString(dbPath);
         InitializeSchema();
-        TightenPermissions(dbPath);
+        SqliteFileStore.TightenPermissions(dbPath);
     }
 
-    private static string ResolveDefaultPath()
-    {
-        var home = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
-            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kubernator");
-        return Path.Combine(home, "auth", "api_keys.db");
-    }
+    private static string ResolveDefaultPath() => Path.Combine(SqliteFileStore.ResolveHome(), "auth", "api_keys.db");
 
     private void InitializeSchema()
     {
@@ -62,19 +48,7 @@ public sealed class SqliteApiKeyStore : IApiKeyStore, IDisposable
         cmd.ExecuteNonQuery();
     }
 
-    private static void TightenPermissions(string path)
-    {
-        if (OperatingSystem.IsWindows() || !File.Exists(path)) return;
-        try { File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite); }
-        catch { }
-    }
-
-    private SqliteConnection OpenConnection()
-    {
-        var conn = new SqliteConnection(connectionString);
-        conn.Open();
-        return conn;
-    }
+    private SqliteConnection OpenConnection() => SqliteFileStore.OpenConnection(connectionString);
 
     public async Task<IReadOnlyList<ApiKeyRecord>> ListAsync(CancellationToken ct = default)
     {
