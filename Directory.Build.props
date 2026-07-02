@@ -18,7 +18,7 @@
     <Product>kubernator</Product>
     <Company>kubernator</Company>
     <Copyright>kubernator</Copyright>
-    <VersionPrefix>0.2.0</VersionPrefix>
+    <VersionPrefix>0.5.0</VersionPrefix>
     <RepositoryUrl>https://github.com/kubernator/kubernator</RepositoryUrl>
     <RootNamespace>Kubernator.$(MSBuildProjectName.Replace('Kubernator.', ''))</RootNamespace>
   </PropertyGroup>
