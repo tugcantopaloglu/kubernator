@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Kubernator.Web.Jobs;
 
 namespace Kubernator.Web.Api;
@@ -13,7 +14,7 @@ public sealed record JobDto
     public long? DurationMs { get; init; }
     public required IReadOnlyList<JobProgressDto> Progress { get; init; }
     public string? Error { get; init; }
-    public object? Result { get; init; }
+    public JsonElement? Result { get; init; }
     public string? KeyId { get; init; }
     public string? KeyName { get; init; }
 
