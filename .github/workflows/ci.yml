@@ -18,6 +18,7 @@ jobs:
   test:
     name: build & test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +33,7 @@ jobs:
         run: dotnet build --configuration Release --no-restore
 
       - name: test
-        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --collect:"XPlat Code Coverage"
+        run: dotnet test --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --blame-hang-timeout 90s --blame-hang-dump-type mini
 
       - name: upload test results
         if: always()
