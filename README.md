@@ -36,10 +36,15 @@ schema may still change between minor versions.
 - **Scans** dependencies against a local OSV-derived vulnerability database — no calls
   to the public internet at scan time.
 - **Validates** the build end-to-end on a disposable [kind](https://kind.sigs.k8s.io/)
-  cluster.
+  cluster, and **deploys** to a real cluster through `kubectl` with a production guard.
 - **Emits** Helm charts, Kustomize bases with environment overlays, Argo CD
   `Application`/`AppProject` resources, and CI pipelines for GitHub Actions, GitLab CI,
   Azure DevOps, or Tekton.
+- **Provisions** an air-gapped HA Kubernetes cluster (RKE2, k3s, or kubeadm) over SSH or
+  locally, pulling all offline artifacts up front — and **monitors** an existing cluster:
+  node health, pods, ingress, network policies, and live metrics.
+- **Rehosts** images into a private registry behind an air gap and **audits** rendered
+  manifests against the kubernator secure baseline.
 - **Self-updates** from a signed release manifest you host yourself, so an offline
   workstation can be upgraded from a USB stick.
 
@@ -53,7 +58,7 @@ The release page also publishes a `release.json` manifest and `checksums.txt`. V
 the SHA-256 of the archive before extracting:
 
 ```sh
-openssl dgst -sha256 kubernator-0.1.0-linux-x64.tar.gz
+openssl dgst -sha256 kubernator-0.5.0-linux-x64.tar.gz
 ```
 
 To build from source you need the .NET 10 SDK:
@@ -99,20 +104,27 @@ Running `kubernator` with no arguments launches the interactive `wizard`.
 | `generate`   | Write a `Dockerfile`, `.dockerignore`, and Kubernetes manifests under `<path>/.kubernator/`.                          |
 | `build`      | Generate, then build the container image with Docker, Podman, or compatible.                                          |
 | `bundle`     | Build everything and pack it into an air-gapped `.kubpack` archive.                                                   |
+| `pull`       | Pull images from a registry and save them as transferable `.tar` files for offline use.                              |
+| `rehost`     | On an air-gapped host, load bundled images, retag under a private registry, push, and rewrite manifest image refs.    |
 | `verify`     | Recompute hashes and (optionally) verify the cosign signature of a bundle.                                            |
 | `keygen`     | Produce a cosign-compatible ECDSA P-256 key pair.                                                                     |
 | `sign`       | Sign a bundle with a private key, emitting a detached `.sig` file.                                                    |
+| `pipeline`   | Generate a CI/CD pipeline for `gh-actions`, `gitlab-ci`, `azure-devops`, or `tekton`.                                 |
 | `helm`       | Render a Helm chart with parameterized templates; optionally `helm package` it.                                       |
 | `kustomize`  | Render a Kustomize base plus `production`, `staging`, and `dev` overlays.                                             |
 | `gitops`     | Render Argo CD `Application` and `AppProject` resources for GitOps delivery.                                          |
-| `pipeline`   | Generate a CI/CD pipeline for `gh-actions`, `gitlab-ci`, `azure-devops`, or `tekton`.                                 |
 | `tls-rotate` | Render a `ServiceAccount` + `Role` + `RoleBinding` + `CronJob` that rotates a self-signed TLS `Secret` on a schedule. |
 | `vulndb`     | Manage the offline vulnerability database (`status`, `update`, `import-zip`, `import`, `export`).                     |
 | `scan`       | Scan an application against the local vulnerability database, with severity gating.                                   |
 | `validate`   | Spin up a kind cluster, load the image, apply the manifests, run a probe.                                             |
+| `deploy`     | Deploy generated manifests to a Kubernetes cluster via `kubectl`, with a production guard and `--dry-run`.            |
+| `monitor`    | Snapshot or watch cluster state: node health, pods, ingress, network policies, and live metrics.                     |
+| `audit`      | Audit a manifests directory against the kubernator secure baseline (AUD codes).                                       |
+| `cluster`    | Pull offline artifacts and provision or upgrade an air-gapped HA cluster (RKE2/k3s/kubeadm) over SSH or locally.      |
+| `vault`      | Manage the local key & cert vault (`list`, `import`, `remove`).                                                       |
 | `doctor`     | Probe the environment (engine, kubectl, kind, vulndb, state directory) and report what is missing.                    |
-| `update`     | `update check` or `update apply` against a release manifest URL or local path.                                        |
 | `version`    | Print the version and platform identifier.                                                                            |
+| `update`     | `update check` or `update apply` against a release manifest URL or local path.                                        |
 | `wizard`     | Interactive flow (alias `ui`).                                                                                        |
 
 Run `kubernator <command> --help` for the full option list of any command.
@@ -179,7 +191,11 @@ src/
   Kubernator.Web       Blazor Server UI (early; mirrors the CLI)
 tests/
   Kubernator.Core.Tests
+  Kubernator.Cli.Tests
+  Kubernator.Runtime.Tests
+  Kubernator.Web.Tests
 .github/workflows/
+  ci.yml               build + test on every push and pull request
   release.yml          single-file publish for five platforms, release manifest, checksums
 ```
 
@@ -205,8 +221,9 @@ dotnet build kubernator.sln
 dotnet test  kubernator.sln
 ```
 
-Tests run against `Kubernator.Core` only and do not require Docker, kubectl, or kind.
-End-to-end coverage of `validate` requires kind and kubectl on `PATH`.
+The unit tests across `Kubernator.Core`, `Kubernator.Cli`, `Kubernator.Runtime`, and
+`Kubernator.Web` do not require Docker, kubectl, or kind. End-to-end coverage of
+`validate` requires kind and kubectl on `PATH`.
 
 ## Contributing
 
