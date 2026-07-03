@@ -157,9 +157,21 @@ Not committed to any release; pick items up as needed.
   Verified end-to-end against the real `dotnet run` binary (not just the test host): a
   `POST /api/v1/build` job persists to `jobs.db`, executes on a worker, and the polled
   `GET /api/v1/jobs` result JSON round-trips correctly.
-- [x] **Test gaps (Jobs/)** — closed for the `Jobs/` subsystem specifically (see above);
-  `Services/BuildPipeline.cs` and the Blazor `Components/` pages still have no test
-  coverage.
+- [x] **Test gaps (`Jobs/` + `Services/BuildPipeline.cs`)** — `Jobs/` is covered by
+  `SqliteJobManagerTests.cs` (see above). `Services/BuildPipeline.cs` is now covered by
+  `BuildPipelineTests.cs` (NSubstitute-mocked `IAnalysisService`/`IStrategySelector`/
+  `IGenerationService`/`IContainerEngineProvider`, first use of NSubstitute in
+  `Kubernator.Web.Tests`), covering: the `NoBuild` early return never touching the container
+  engine; a full build staging the source tree plus the generated `Dockerfile`/
+  `.dockerignore` into `build-context/`; the case where the default output directory
+  (`<path>/.kubernator`) sits *inside* the source path, which exercises
+  `CopyDirectoryAsync`'s exclusion of `excludeRoot` — without it, the build context would
+  recursively copy itself into itself; a multi-platform request against an engine that
+  doesn't support it throwing before `BuildAsync` is ever called; and a custom output
+  directory outside the source path, which copies the source tree unfiltered since there's
+  nothing to exclude. The Blazor `Components/` pages still have no test coverage — this repo
+  has no Blazor component test harness (e.g. bUnit) set up yet, which is a bigger, separate
+  lift.
 - [x] **Serilog configuration duplication** — minimum levels/overrides and enrichers now
   live in `appsettings.json`'s `Serilog` section and are picked up by both loggers via
   `.ReadFrom.Configuration(...)` (the bootstrap logger builds a small standalone
