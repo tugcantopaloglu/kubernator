@@ -8,6 +8,7 @@
 @using Kubernator.Web.Components.Shared
 @using Kubernator.Web.Jobs
 @inject IJobManager Jobs
+@inject Kubernator.Web.Ui.UiActionGateway Gateway
 
 <PageTitle>cluster · kubernator</PageTitle>
 
@@ -322,8 +323,16 @@
             IncludeHelm = pullForm.Helm,
             IncludeK9s = pullForm.K9s
         };
-        var record = Jobs.Enqueue("cluster-pull", payload);
-        pullPanel!.Start(record.Id);
+        try
+        {
+            var record = await Gateway.InvokeAsync("cluster/pull", () => Jobs.Enqueue("cluster-pull", payload));
+            pullPanel!.Start(record.Id);
+        }
+        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        {
+            pullError = ex.Message;
+            pullBusy = false;
+        }
     }
 
     private void OnPullJobCompleted(JobRecord record)
@@ -354,7 +363,8 @@
         try
         {
             var connection = new NodeConnection { Mode = NodeConnectionMode.Ssh, Host = trustForm.Host, Port = trustForm.Port, Username = trustForm.Username };
-            trustFingerprint = await SshNodeExecutor.ProbeHostKeyFingerprintAsync(connection);
+            trustFingerprint = await Gateway.InvokeAsync("cluster/trust-probe",
+                _ => SshNodeExecutor.ProbeHostKeyFingerprintAsync(connection));
         }
         catch (Exception ex)
         {
@@ -398,8 +408,16 @@
         }
 
         var payload = new ClusterTopologyRequest { TopologyPath = topologyPath, AllowProduction = installForm.AllowProduction };
-        var record = Jobs.Enqueue("cluster-install", payload);
-        installPanel!.Start(record.Id);
+        try
+        {
+            var record = await Gateway.InvokeAsync("cluster/install", () => Jobs.Enqueue("cluster-install", payload));
+            installPanel!.Start(record.Id);
+        }
+        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        {
+            installResult = new ClusterInstallResultDto { Ok = false, Errors = [ex.Message], CompletedSteps = [] };
+            installBusy = false;
+        }
     }
 
     private void OnInstallJobCompleted(JobRecord record)
@@ -432,8 +450,16 @@
         }
 
         var payload = new ClusterUpgradeRequest { TopologyPath = topologyPath, ToVersion = upgradeForm.ToVersion, AllowProduction = upgradeForm.AllowProduction };
-        var record = Jobs.Enqueue("cluster-upgrade", payload);
-        upgradePanel!.Start(record.Id);
+        try
+        {
+            var record = await Gateway.InvokeAsync("cluster/upgrade", () => Jobs.Enqueue("cluster-upgrade", payload));
+            upgradePanel!.Start(record.Id);
+        }
+        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        {
+            upgradeResult = new ClusterUpgradeResultDto { Ok = false, Errors = [ex.Message], UpgradedNodes = [], SkippedNodes = [] };
+            upgradeBusy = false;
+        }
     }
 
     private void OnUpgradeJobCompleted(JobRecord record)
@@ -468,8 +494,16 @@
         }
 
         var payload = new ClusterStatusRequest { TopologyPath = topologyPath };
-        var record = Jobs.Enqueue("cluster-status", payload);
-        statusPanel!.Start(record.Id);
+        try
+        {
+            var record = await Gateway.InvokeAsync("cluster/status", () => Jobs.Enqueue("cluster-status", payload));
+            statusPanel!.Start(record.Id);
+        }
+        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        {
+            statusError = ex.Message;
+            statusBusy = false;
+        }
     }
 
     private void OnStatusJobCompleted(JobRecord record)

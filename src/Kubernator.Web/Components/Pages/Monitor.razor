@@ -3,6 +3,7 @@
 @implements IDisposable
 @inject IClusterMonitor ClusterMonitor
 @inject Kubernator.Core.Deployment.IClusterApplier Applier
+@inject Kubernator.Web.Ui.UiActionGateway Gateway
 
 <PageTitle>monitor · kubernator</PageTitle>
 
@@ -347,7 +348,7 @@
                 return;
             }
 
-            snapshot = await ClusterMonitor.GetSnapshotAsync(new ClusterMonitorOptions
+            var options = new ClusterMonitorOptions
             {
                 Context = ctx,
                 Namespace = string.IsNullOrWhiteSpace(namespaceFilter) ? null : namespaceFilter,
@@ -356,7 +357,9 @@
                 IncludeIngress = includeIngress,
                 IncludeNetworkPolicies = includeNetPol,
                 IncludeServices = includeServices
-            });
+            };
+            snapshot = await Gateway.InvokeAsync("monitor/snapshot",
+                token => ClusterMonitor.GetSnapshotAsync(options, token));
         }
         catch (Exception ex)
         {

@@ -55,6 +55,8 @@ try
     builder.Services.AddSingleton<ApiKeyRateLimitCache>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ApiKeyRateLimitCache>());
     builder.Services.AddSingleton<AuditLog>();
+    builder.Services.AddSingleton<Kubernator.Web.Ui.UiActionRateLimiter>();
+    builder.Services.AddScoped<Kubernator.Web.Ui.UiActionGateway>();
     builder.Services.AddSingleton<SqliteJobManager>();
     builder.Services.AddSingleton<IJobManager>(sp => sp.GetRequiredService<SqliteJobManager>());
     builder.Services.AddSingleton<IJobHandler, ValidateJobHandler>();

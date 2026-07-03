@@ -5,6 +5,7 @@
 @inject IGenerationService Generation
 @inject Kubernator.Core.Deployment.IClusterApplier Applier
 @inject ManifestAuditor Auditor
+@inject Kubernator.Web.Ui.UiActionGateway Gateway
 
 <PageTitle>deploy · kubernator</PageTitle>
 
@@ -309,7 +310,7 @@
                 return;
             }
 
-            result = await Applier.ApplyAsync(new Kubernator.Core.Deployment.DeployOptions
+            var deployOptions = new Kubernator.Core.Deployment.DeployOptions
             {
                 ManifestsDirectory = manifestsDir,
                 Context = form.Context,
@@ -317,7 +318,9 @@
                 DryRun = form.DryRun,
                 AllowProduction = form.AllowProduction,
                 CreateNamespace = form.CreateNamespace
-            }, progress);
+            };
+            var action = form.DryRun ? "deploy/dry-run" : "deploy/apply";
+            result = await Gateway.InvokeAsync(action, _ => Applier.ApplyAsync(deployOptions, progress));
 
             if (!result.Ok && result.Errors.Count > 0)
             {

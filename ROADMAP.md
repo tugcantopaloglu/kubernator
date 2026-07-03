@@ -92,11 +92,31 @@ Not committed to any release; pick items up as needed.
   that refreshes all key rate limits from SQLite every 30s; `AdminApiKeysController`
   also primes/evicts it directly on key create/delete so a freshly created key's custom
   limit takes effect immediately instead of waiting for the next refresh tick.
-- [ ] **Blazor UI bypasses the API/audit/rate-limit layer** — pages like `Monitor.razor`
-  inject `Kubernator.Core` services directly rather than going through
-  `Kubernator.Web.Api` controllers, so UI-driven actions aren't rate-limited,
-  API-key-scoped, or written to the audit log (session cookie auth only). `Cluster.razor`
-  follows the same existing convention for consistency, so it has the same gap.
+- [x] **Blazor UI bypasses the API/audit/rate-limit layer** — the interactive pages still
+  inject `Kubernator.Core` services directly (routing every UI action back through a
+  self-issued `/api/v1` HTTP call would mean minting a server-side API key for the circuit
+  and re-serializing everything, an anti-pattern for an in-process Blazor Server app), but
+  the three cross-cutting concerns the API middleware provided are now applied to UI actions
+  through a shared `UiActionGateway` (`Ui/UiActionGateway.cs`, a scoped service) instead of
+  the HTTP pipeline. Every cluster-affecting action is wrapped in `Gateway.InvokeAsync(name,
+  work)`, which (1) **audits** to the same `AuditLog` singleton the API uses — one JSONL
+  entry per action with `Method="UI"`, the action name as `Path`, the resolved status
+  (`200`/`429`/`500`), duration, and — closing the "session cookie auth only, so we don't
+  know who did it" gap — the logged-in username (via the circuit's
+  `AuthenticationStateProvider`) plus its `auth_method` claim; (2) **rate-limits** per session
+  user via a new singleton `UiActionRateLimiter` (`Ui/UiActionRateLimiter.cs`) that mirrors
+  the HTTP `GlobalLimiter` — a fixed-window `PartitionedRateLimiter<string>` keyed by
+  username at the same `SqliteApiKeyStore.DefaultRateLimitPerMinute` budget — since the
+  circuit's SignalR traffic never reaches the `/api/v1`-scoped HTTP limiter; a refused action
+  throws `UiRateLimitException`, which the pages surface as an error banner and log as a
+  `429` audit entry. Wired into `Monitor.razor` (snapshot), `Deploy.razor`
+  (`deploy/apply`+`deploy/dry-run`), and `Cluster.razor` (pull/install/upgrade/status job
+  submission + SSH trust-probe) — the pages the original note named plus `Deploy` as the
+  most cluster-sensitive one. Covered by `UiActionGatewayTests.cs`: success/failure audit
+  attribution, anonymous fallback, per-user budget exhaustion, and per-user partitioning.
+  API-key *scope* enforcement is intentionally not replicated — a cookie session is a single
+  authenticated operator that logged in through password+TOTP, not a scoped machine key, so
+  the meaningful gap was attribution (now closed via the audit user), not scope narrowing.
 - [x] **`Kubernator.Web` Dockerfile hardcodes `--allow-insecure-network=true`** — the
   flag was baked into `ENTRYPOINT` itself, so every consumer (`docker run`, the sample
   k8s manifest's `args:`, plain `docker compose`) silently inherited the insecure default
