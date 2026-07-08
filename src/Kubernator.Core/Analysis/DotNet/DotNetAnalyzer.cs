@@ -179,6 +179,16 @@ public sealed class DotNetAnalyzer : IAppAnalyzer
                 Arguments = []
             };
         }
+        else if (layout.HasMainAssembly)
+        {
+            entry = new EntryPoint
+            {
+                Path = layout.MainAssemblyPath!,
+                AssemblyName = assembly?.AssemblyName ?? Path.GetFileNameWithoutExtension(layout.MainAssemblyPath!),
+                StartupCommand = "dotnet",
+                Arguments = [Path.GetFileName(layout.MainAssemblyPath!)]
+            };
+        }
 
         if (publishMode == PublishMode.SelfContained || publishMode == PublishMode.NativeAot)
         {

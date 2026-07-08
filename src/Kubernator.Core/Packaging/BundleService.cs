@@ -243,7 +243,7 @@ public sealed class BundleService : IBundleService
             {
                 await ExtractTarGzAsync(bundlePath, temp, ct);
             }
-            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or FormatException)
+            catch (Exception ex) when (ex is InvalidDataException or EndOfStreamException or FormatException or IOException)
             {
                 return new BundleVerificationResult
                 {

@@ -136,9 +136,9 @@ internal static class AzureDevOpsEmitter
     {
         w.Line("- script: |");
         w.Indent();
+        w.Indent();
         w.Line(step.Run);
         w.Outdent();
-        w.Indent();
         w.Line($"displayName: {YamlValue.String(step.Name)}");
         w.Outdent();
     }

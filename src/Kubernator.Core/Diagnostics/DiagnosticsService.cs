@@ -220,8 +220,9 @@ public sealed class DiagnosticsService : IDiagnosticsService
 
     private static DiagnosticCheck CheckHomeDirectoryWritable()
     {
-        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var dir = Path.Combine(home, ".kubernator");
+        var home = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".kubernator");
+        var dir = home;
         try
         {
             Directory.CreateDirectory(dir);

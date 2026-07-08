@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 var logHome = Environment.GetEnvironmentVariable("KUBERNATOR_HOME")
@@ -46,6 +47,7 @@ app.Configure(config =>
     config.SetApplicationName("kubernator");
     config.SetApplicationVersion(KubernatorVersion.Current);
     config.PropagateExceptions();
+    config.UseStrictParsing();
 
     config.AddCommand<AnalyzeCommand>("analyze")
         .WithDescription("Detect application type and report runtime, dependencies, and network surface.")
@@ -183,9 +185,12 @@ app.Configure(config =>
         .WithAlias("ui");
 });
 
-if (args.Length == 0)
+try
 {
-    return await app.RunAsync(["wizard"]);
+    return await app.RunAsync(args.Length == 0 ? ["wizard"] : args);
 }
-
-return await app.RunAsync(args);
+catch (CommandParseException ex)
+{
+    AnsiConsole.MarkupLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+    return 1;
+}

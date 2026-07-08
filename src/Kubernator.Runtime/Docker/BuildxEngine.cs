@@ -30,6 +30,18 @@ public sealed class BuildxEngine : IContainerEngine
     public Task SaveImageAsync(string reference, string platform, string outputTarPath, CancellationToken ct = default) =>
         inner.SaveImageAsync(reference, outputTarPath, ct);
 
+    public IAsyncEnumerable<string> PullImageAsync(string reference, string? platform = null, CancellationToken ct = default) =>
+        inner.PullImageAsync(reference, platform, ct);
+
+    public Task LoadImageAsync(string tarPath, CancellationToken ct = default) =>
+        inner.LoadImageAsync(tarPath, ct);
+
+    public Task TagImageAsync(string sourceReference, string targetReference, CancellationToken ct = default) =>
+        inner.TagImageAsync(sourceReference, targetReference, ct);
+
+    public IAsyncEnumerable<string> PushImageAsync(string reference, CancellationToken ct = default) =>
+        inner.PushImageAsync(reference, ct);
+
     public async IAsyncEnumerable<string> BuildAsync(BuildContext context, [EnumeratorCancellation] CancellationToken ct = default)
     {
         var platform = context.Platforms.Count > 0 ? context.Platforms[0] : null;
