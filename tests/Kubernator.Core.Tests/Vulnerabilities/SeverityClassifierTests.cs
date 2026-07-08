@@ -28,10 +28,19 @@ public sealed class SeverityClassifierTests
 
     [Theory]
     [InlineData("CVSS_V3:9.8", Severity.Critical)]
+    [InlineData("CVSS_V3:3.0", Severity.Low)]
     [InlineData("7.5", Severity.High)]
     public void Classifies_numeric_scores(string raw, Severity expected)
     {
         SeverityClassifier.FromRaw(raw).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("CVSS_V4:CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N")]
+    [InlineData("CVSS_V2:AV:N/AC:L/Au:N/C:C/I:C/A:C")]
+    public void Uncomputable_vector_is_unknown_not_downgraded_to_version_number(string raw)
+    {
+        SeverityClassifier.FromRaw(raw).Should().Be(Severity.Unknown);
     }
 
     [Fact]
