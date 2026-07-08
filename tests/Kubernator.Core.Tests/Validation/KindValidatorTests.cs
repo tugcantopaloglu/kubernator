@@ -82,6 +82,65 @@ public sealed class KindValidatorTests
     }
 
     [Fact]
+    public async Task Creates_namespace_before_apply_for_non_default_namespace()
+    {
+        var runner = new ScriptedProcessRunner();
+        runner.Enqueue("kind", ["version"], exit: 0);
+        runner.Enqueue("kind", ["create", "cluster", "--name", "ctest", "--wait", "60s"], exit: 0);
+        runner.Enqueue("kind", ["load", "docker-image", "demo:1.0", "--name", "ctest"], exit: 0);
+        runner.Enqueue("kubectl", ["create", "namespace", "shop", "--context", "kind-ctest"], exit: 0);
+        runner.Enqueue("kubectl", ["apply", "-f", "/tmp/m", "--context", "kind-ctest", "-n", "shop"], exit: 0);
+        runner.Enqueue("kubectl",
+            ["wait", "--for=condition=available", "--timeout", "120s", "deployment", "demo", "--context", "kind-ctest", "-n", "shop"],
+            exit: 0);
+        runner.Enqueue("kind", ["delete", "cluster", "--name", "ctest"], exit: 0);
+
+        var validator = new KindValidator(runner);
+        var result = await validator.ValidateAsync(new ValidationOptions
+        {
+            ManifestsDirectory = "/tmp/m",
+            ImageReference = "demo:1.0",
+            DeploymentName = "demo",
+            ClusterName = "ctest",
+            Namespace = "shop"
+        });
+
+        result.Ok.Should().BeTrue();
+        result.Steps.Should().Contain(s => s.Name.StartsWith("kubectl create namespace", StringComparison.Ordinal) && s.Ok);
+        result.Steps.Should().Contain(s => s.Name == "kubectl apply" && s.Ok);
+    }
+
+    [Fact]
+    public async Task Treats_already_existing_namespace_as_success()
+    {
+        var runner = new ScriptedProcessRunner();
+        runner.Enqueue("kind", ["version"], exit: 0);
+        runner.Enqueue("kind", ["create", "cluster", "--name", "ctest", "--wait", "60s"], exit: 0);
+        runner.Enqueue("kind", ["load", "docker-image", "demo:1.0", "--name", "ctest"], exit: 0);
+        runner.Enqueue("kubectl", ["create", "namespace", "shop", "--context", "kind-ctest"],
+            exit: 1, stderr: "Error from server (AlreadyExists): namespaces \"shop\" already exists");
+        runner.Enqueue("kubectl", ["apply", "-f", "/tmp/m", "--context", "kind-ctest", "-n", "shop"], exit: 0);
+        runner.Enqueue("kubectl",
+            ["wait", "--for=condition=available", "--timeout", "120s", "deployment", "demo", "--context", "kind-ctest", "-n", "shop"],
+            exit: 0);
+        runner.Enqueue("kind", ["delete", "cluster", "--name", "ctest"], exit: 0);
+
+        var validator = new KindValidator(runner);
+        var result = await validator.ValidateAsync(new ValidationOptions
+        {
+            ManifestsDirectory = "/tmp/m",
+            ImageReference = "demo:1.0",
+            DeploymentName = "demo",
+            ClusterName = "ctest",
+            Namespace = "shop"
+        });
+
+        result.Ok.Should().BeTrue();
+        result.Steps.Should().Contain(s => s.Name.StartsWith("kubectl create namespace", StringComparison.Ordinal) && s.Ok);
+        result.Steps.Should().Contain(s => s.Name == "kubectl apply" && s.Ok);
+    }
+
+    [Fact]
     public async Task Reports_kubectl_apply_failure_and_stops()
     {
         var runner = new ScriptedProcessRunner();

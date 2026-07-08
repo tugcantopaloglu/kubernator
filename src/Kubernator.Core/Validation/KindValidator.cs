@@ -52,6 +52,17 @@ public sealed class KindValidator : IValidator
                 return Build(steps, false, options.ClusterName, clusterCreated || options.ReuseExistingCluster);
             }
 
+            if (!string.Equals(options.Namespace, "default", StringComparison.Ordinal))
+            {
+                var namespaceStep = await RunStepAsync($"kubectl create namespace ({options.Namespace})",
+                    () => EnsureNamespaceAsync(options, context, ct), progress);
+                steps.Add(namespaceStep);
+                if (!namespaceStep.Ok)
+                {
+                    return Build(steps, false, options.ClusterName, clusterCreated || options.ReuseExistingCluster);
+                }
+            }
+
             var applyStep = await RunStepAsync("kubectl apply", () =>
                 Run(options.KubectlBinary,
                     ["apply", "-f", options.ManifestsDirectory, "--context", context, "-n", options.Namespace],
@@ -227,6 +238,18 @@ public sealed class KindValidator : IValidator
             Output = outcome.StandardOutput,
             Error = outcome.Ok ? null : (string.IsNullOrWhiteSpace(outcome.StandardError) ? $"exit {outcome.ExitCode}" : outcome.StandardError)
         };
+    }
+
+    private async Task<ProcessOutcome> EnsureNamespaceAsync(ValidationOptions options, string context, CancellationToken ct)
+    {
+        var outcome = await Run(options.KubectlBinary,
+            ["create", "namespace", options.Namespace, "--context", context],
+            ct, TimeSpan.FromSeconds(60));
+        if (!outcome.Ok && outcome.StandardError.Contains("AlreadyExists", StringComparison.OrdinalIgnoreCase))
+        {
+            return outcome with { ExitCode = 0, StandardOutput = $"namespace/{options.Namespace} already exists" };
+        }
+        return outcome;
     }
 
     private Task<ProcessOutcome> Run(string fileName, IReadOnlyList<string> args, CancellationToken ct, TimeSpan? timeout = null)
