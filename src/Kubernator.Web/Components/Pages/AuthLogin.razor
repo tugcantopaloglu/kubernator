@@ -17,12 +17,12 @@ else
             <h1>sign in</h1>
             <p class="muted">username + password + 6-digit code from your authenticator. switch to a recovery code if your device is unavailable.</p>
             <div class="row" style="gap:8px; margin-bottom:var(--s-2)">
-                <button type="button" class="btn @(useRecovery ? "btn-ghost" : "btn-primary")" @onclick="() => useRecovery = false">
+                <a class="btn @(useRecovery ? "btn-ghost" : "btn-primary")" href="@ToggleHref(false)">
                     <span>authenticator</span>
-                </button>
-                <button type="button" class="btn @(useRecovery ? "btn-primary" : "btn-ghost")" @onclick="() => useRecovery = true">
+                </a>
+                <a class="btn @(useRecovery ? "btn-primary" : "btn-ghost")" href="@ToggleHref(true)">
                     <span>recovery code</span>
-                </button>
+                </a>
             </div>
             <form method="post" action="/api/auth/login">
                 <AntiforgeryToken />
@@ -68,16 +68,28 @@ else
 @code {
     [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
     [SupplyParameterFromQuery(Name = "error")] public string? ErrorMessage { get; set; }
+    [SupplyParameterFromQuery(Name = "recovery")] public string? Recovery { get; set; }
 
     private bool notConfigured;
     private bool useRecovery;
 
     protected override async Task OnInitializedAsync()
     {
+        useRecovery = Recovery == "1";
         notConfigured = !await Auth.IsConfiguredAsync();
         if (notConfigured)
         {
             Nav.NavigateTo("/auth/setup", forceLoad: true);
         }
+    }
+
+    private string ToggleHref(bool recovery)
+    {
+        var query = $"?recovery={(recovery ? "1" : "0")}";
+        if (!string.IsNullOrEmpty(ReturnUrl))
+        {
+            query += $"&returnUrl={Uri.EscapeDataString(ReturnUrl)}";
+        }
+        return "/auth/login" + query;
     }
 }

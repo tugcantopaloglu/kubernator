@@ -175,8 +175,15 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var all = await Vault.ListAsync();
-        vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+        try
+        {
+            var all = await Vault.ListAsync();
+            vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+        }
+        catch (Exception ex)
+        {
+            error = $"could not read the key vault: {ex.Message}";
+        }
     }
     private BundleVerificationResult? result;
     private bool integrityChecked;

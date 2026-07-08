@@ -29,7 +29,7 @@
     </div>
     <div class="form-row">
         <label for="m-watch">refresh (seconds, 0 = off)</label>
-        <InputNumber id="m-watch" @bind-Value="refreshSeconds" class="input-w-sm" />
+        <InputNumber id="m-watch" @bind-Value="refreshSeconds" @bind-Value:after="StartLoopIfNeeded" class="input-w-sm" />
     </div>
 </div>
 
@@ -374,6 +374,7 @@
     private void StartLoopIfNeeded()
     {
         loopCts?.Cancel();
+        loopCts?.Dispose();
         loopCts = null;
         if (refreshSeconds <= 0) return;
         loopCts = new CancellationTokenSource();

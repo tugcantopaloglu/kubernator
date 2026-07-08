@@ -31,6 +31,14 @@
     }
 </div>
 
+@if (runError is not null)
+{
+    <div class="banner err" style="margin-bottom:var(--s-4)">
+        <svg class="ico" width="16" height="16"><use href="#i-x" /></svg>
+        <div class="banner-body"><span class="label">error</span>@runError</div>
+    </div>
+}
+
 @if (report is not null)
 {
     <div class="section">
@@ -88,6 +96,7 @@
 
 @code {
     private DiagnosticReport? report;
+    private string? runError;
     private bool busy;
     private bool autoRefresh;
     private int intervalSeconds = 30;
@@ -103,7 +112,12 @@
         try
         {
             report = await Diagnostics.RunAsync();
+            runError = null;
             lastRefreshed = DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex)
+        {
+            runError = ex.Message;
         }
         finally
         {

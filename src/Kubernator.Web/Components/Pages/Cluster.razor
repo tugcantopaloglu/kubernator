@@ -328,7 +328,7 @@
             var record = await Gateway.InvokeAsync("cluster/pull", () => Jobs.Enqueue("cluster-pull", payload));
             pullPanel!.Start(record.Id);
         }
-        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        catch (Exception ex)
         {
             pullError = ex.Message;
             pullBusy = false;
@@ -382,14 +382,22 @@
         {
             return;
         }
-        KnownHostsStore.Default().Trust(trustForm.Host, trustForm.Port, trustFingerprint);
-        trustSaved = true;
+        try
+        {
+            KnownHostsStore.Default().Trust(trustForm.Host, trustForm.Port, trustFingerprint);
+            trustSaved = true;
+        }
+        catch (Exception ex)
+        {
+            trustError = ex.Message;
+        }
     }
 
     private async Task HandleInstall()
     {
         if (string.IsNullOrWhiteSpace(installForm.TopologyPath))
         {
+            installResult = new ClusterInstallResultDto { Ok = false, Errors = ["topology path is required"], CompletedSteps = [] };
             return;
         }
         installBusy = true;
@@ -413,7 +421,7 @@
             var record = await Gateway.InvokeAsync("cluster/install", () => Jobs.Enqueue("cluster-install", payload));
             installPanel!.Start(record.Id);
         }
-        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        catch (Exception ex)
         {
             installResult = new ClusterInstallResultDto { Ok = false, Errors = [ex.Message], CompletedSteps = [] };
             installBusy = false;
@@ -432,6 +440,7 @@
     {
         if (string.IsNullOrWhiteSpace(upgradeForm.TopologyPath) || string.IsNullOrWhiteSpace(upgradeForm.ToVersion))
         {
+            upgradeResult = new ClusterUpgradeResultDto { Ok = false, Errors = ["topology path and target version are required"], UpgradedNodes = [], SkippedNodes = [] };
             return;
         }
         upgradeBusy = true;
@@ -455,7 +464,7 @@
             var record = await Gateway.InvokeAsync("cluster/upgrade", () => Jobs.Enqueue("cluster-upgrade", payload));
             upgradePanel!.Start(record.Id);
         }
-        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        catch (Exception ex)
         {
             upgradeResult = new ClusterUpgradeResultDto { Ok = false, Errors = [ex.Message], UpgradedNodes = [], SkippedNodes = [] };
             upgradeBusy = false;
@@ -499,7 +508,7 @@
             var record = await Gateway.InvokeAsync("cluster/status", () => Jobs.Enqueue("cluster-status", payload));
             statusPanel!.Start(record.Id);
         }
-        catch (Kubernator.Web.Ui.UiRateLimitException ex)
+        catch (Exception ex)
         {
             statusError = ex.Message;
             statusBusy = false;

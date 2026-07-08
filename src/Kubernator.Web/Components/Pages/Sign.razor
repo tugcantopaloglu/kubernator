@@ -211,9 +211,16 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var all = await Vault.ListAsync();
-        vaultPrivateKeys = all.Where(e => e.Kind == VaultEntryKind.PrivateKey).ToList();
-        vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+        try
+        {
+            var all = await Vault.ListAsync();
+            vaultPrivateKeys = all.Where(e => e.Kind == VaultEntryKind.PrivateKey).ToList();
+            vaultPublicKeys = all.Where(e => e.Kind == VaultEntryKind.PublicKey).ToList();
+        }
+        catch (Exception ex)
+        {
+            keyError = $"could not read the key vault: {ex.Message}";
+        }
     }
 
     private async Task HandleKeygen()

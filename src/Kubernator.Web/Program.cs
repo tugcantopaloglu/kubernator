@@ -407,7 +407,11 @@ try
 
     app.MapPost("/api/auth/setup", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
     {
-        await antiforgery.ValidateRequestAsync(req.HttpContext);
+        try { await antiforgery.ValidateRequestAsync(req.HttpContext); }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Redirect("/auth/setup?error=" + Uri.EscapeDataString("session expired — please try again"));
+        }
         if (await auth.IsConfiguredAsync())
         {
             return Results.Redirect("/auth/login?error=" + Uri.EscapeDataString("already configured"));
@@ -434,7 +438,11 @@ try
 
     app.MapPost("/api/auth/login", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
     {
-        await antiforgery.ValidateRequestAsync(req.HttpContext);
+        try { await antiforgery.ValidateRequestAsync(req.HttpContext); }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Redirect("/auth/login?error=" + Uri.EscapeDataString("session expired — please sign in again"));
+        }
         var form = await req.ReadFormAsync();
         var username = form["username"].ToString();
         var password = form["password"].ToString();
@@ -487,7 +495,11 @@ try
 
     app.MapPost("/api/auth/setup/test-totp", async (HttpRequest req, AuthService auth, IAntiforgery antiforgery) =>
     {
-        await antiforgery.ValidateRequestAsync(req.HttpContext);
+        try { await antiforgery.ValidateRequestAsync(req.HttpContext); }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Redirect("/auth/setup-complete?error=" + Uri.EscapeDataString("session expired — please try again"));
+        }
         var form = await req.ReadFormAsync();
         var ticket = form["ticket"].ToString();
         var code = form["code"].ToString();
@@ -502,7 +514,11 @@ try
 
     app.MapPost("/api/auth/logout", async (HttpContext ctx, IAntiforgery antiforgery) =>
     {
-        await antiforgery.ValidateRequestAsync(ctx);
+        try { await antiforgery.ValidateRequestAsync(ctx); }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Redirect("/auth/login");
+        }
         await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return Results.Redirect("/auth/login");
     });

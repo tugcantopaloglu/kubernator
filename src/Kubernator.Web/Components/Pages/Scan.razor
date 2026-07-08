@@ -134,11 +134,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var manifest = await Database.GetManifestAsync();
-        manifestPresent = manifest is not null;
-        dbStatus = manifest is null
-            ? "not present (run kubernator vulndb update or vulndb import)"
-            : $"{manifest.Ecosystems.Count} ecosystem(s), updated {manifest.UpdatedAt:O}";
+        try
+        {
+            var manifest = await Database.GetManifestAsync();
+            manifestPresent = manifest is not null;
+            dbStatus = manifest is null
+                ? "not present (run kubernator vulndb update or vulndb import)"
+                : $"{manifest.Ecosystems.Count} ecosystem(s), updated {manifest.UpdatedAt:O}";
+        }
+        catch (Exception ex)
+        {
+            manifestPresent = false;
+            dbStatus = "unavailable";
+            error = $"could not read the vulnerability database: {ex.Message}";
+        }
     }
 
     private async Task HandleSubmit()

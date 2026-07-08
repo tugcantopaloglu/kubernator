@@ -59,7 +59,7 @@
                 <li class="@(string.Equals(f, currentFile, StringComparison.Ordinal) ? "active" : "")">
                     <svg class="ico" width="14" height="14"><use href="#i-file" /></svg>
                     <a class="path" href="javascript:void(0)" @onclick="() => OpenFile(f)"><code>@Path.GetFileName(f)</code></a>
-                    <span class="size">@FormatSize(new FileInfo(f).Length)</span>
+                    <span class="size">@FormatSize(fileSizes.GetValueOrDefault(f))</span>
                 </li>
             }
         </ul>
@@ -145,6 +145,7 @@
 
     private readonly Form form = new();
     private List<string> files = new();
+    private readonly Dictionary<string, long> fileSizes = new(StringComparer.Ordinal);
     private string? currentFile;
     private string currentContent = string.Empty;
     private string? loadError;
@@ -156,6 +157,7 @@
     {
         loadError = null;
         files.Clear();
+        fileSizes.Clear();
         currentFile = null;
         audit = null;
         try
@@ -175,6 +177,11 @@
                 .Where(p => p.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) || p.EndsWith(".yml", StringComparison.OrdinalIgnoreCase))
                 .OrderBy(p => p, StringComparer.Ordinal)
                 .ToList();
+            foreach (var f in files)
+            {
+                try { fileSizes[f] = new FileInfo(f).Length; }
+                catch { fileSizes[f] = 0; }
+            }
             RunAudit();
         }
         catch (Exception ex)

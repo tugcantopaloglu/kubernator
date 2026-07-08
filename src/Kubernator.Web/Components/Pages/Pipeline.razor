@@ -173,7 +173,7 @@
             };
 
             var output = string.IsNullOrEmpty(form.OutputDirectory)
-                ? Environment.CurrentDirectory
+                ? System.IO.Path.Combine(resolved, ".kubernator", "pipeline")
                 : System.IO.Path.GetFullPath(form.OutputDirectory!);
 
             result = await Pipelines.GenerateAsync(target, options, output);

@@ -135,8 +135,17 @@
 
     private async Task Refresh()
     {
-        var list = await Store.ListAsync();
-        entries = list.ToList();
+        try
+        {
+            var list = await Store.ListAsync();
+            entries = list.ToList();
+        }
+        catch (Exception ex)
+        {
+            entries = new();
+            error = true;
+            message = $"could not read the key vault: {ex.Message}";
+        }
     }
 
     private async Task HandleAdd()

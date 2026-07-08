@@ -261,7 +261,14 @@
 
     private async Task RefreshManifest()
     {
-        manifest = await Database.GetManifestAsync();
+        try
+        {
+            manifest = await Database.GetManifestAsync();
+        }
+        catch
+        {
+            manifest = null;
+        }
     }
 
     private async Task HandleUpdate()

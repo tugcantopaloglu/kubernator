@@ -223,8 +223,7 @@
     private bool CanDeploy =>
         !string.IsNullOrWhiteSpace(form.Context)
         && (!string.IsNullOrWhiteSpace(form.Path) || !string.IsNullOrWhiteSpace(form.ManifestsDirectory))
-        && (!LooksProduction || form.AllowProduction)
-        && (audit is null || audit.Pass || form.AllowInsecure);
+        && (!LooksProduction || form.AllowProduction);
 
     private string ButtonLabel
     {
