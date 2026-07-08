@@ -55,24 +55,32 @@ internal sealed class UpdateCommand : AsyncCommand<UpdateCommand.Settings>
         var mode = settings.Mode.ToLowerInvariant();
         if (mode == "check")
         {
-            var check = await updates.CheckAsync(source);
-            AnsiConsole.MarkupLine($"[grey]current[/]    {Markup.Escape(check.CurrentVersion)}");
-            AnsiConsole.MarkupLine($"[grey]latest[/]     {Markup.Escape(check.Manifest.Version)} (published {check.Manifest.PublishedAt:O})");
-            if (check.UpgradeAvailable)
+            try
             {
-                AnsiConsole.MarkupLine("[green]upgrade available[/]");
+                var check = await updates.CheckAsync(source);
+                AnsiConsole.MarkupLine($"[grey]current[/]    {Markup.Escape(check.CurrentVersion)}");
+                AnsiConsole.MarkupLine($"[grey]latest[/]     {Markup.Escape(check.Manifest.Version)} (published {check.Manifest.PublishedAt:O})");
+                if (check.UpgradeAvailable)
+                {
+                    AnsiConsole.MarkupLine("[green]upgrade available[/]");
+                }
+                else
+                {
+                    AnsiConsole.MarkupLine("[grey]up to date[/]");
+                }
+                var rids = string.Join(", ", check.Manifest.Artifacts.Select(a => a.RuntimeIdentifier));
+                AnsiConsole.MarkupLine($"[grey]artifacts[/]  {Markup.Escape(rids)}");
+                if (!string.IsNullOrEmpty(check.Manifest.Notes))
+                {
+                    AnsiConsole.MarkupLine($"[grey]notes[/]      {Markup.Escape(check.Manifest.Notes)}");
+                }
+                return 0;
             }
-            else
+            catch (Exception ex)
             {
-                AnsiConsole.MarkupLine("[grey]up to date[/]");
+                AnsiConsole.MarkupLine($"[red]update check failed:[/] {Markup.Escape(ex.Message)}");
+                return 1;
             }
-            var rids = string.Join(", ", check.Manifest.Artifacts.Select(a => a.RuntimeIdentifier));
-            AnsiConsole.MarkupLine($"[grey]artifacts[/]  {Markup.Escape(rids)}");
-            if (!string.IsNullOrEmpty(check.Manifest.Notes))
-            {
-                AnsiConsole.MarkupLine($"[grey]notes[/]      {Markup.Escape(check.Manifest.Notes)}");
-            }
-            return check.UpgradeAvailable ? 0 : 0;
         }
 
         var progress = new Progress<string>(line => AnsiConsole.MarkupLine($"[grey]update[/]    {Markup.Escape(line)}"));

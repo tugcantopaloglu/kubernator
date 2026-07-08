@@ -171,6 +171,37 @@ public sealed class ApiTests
         json.GetProperty("downloadToken").GetString().Should().NotBeNullOrEmpty();
         var url = json.GetProperty("downloadUrl").GetString()!;
         url.Should().StartWith("/download/");
+
+        var download = await client.GetAsync(url);
+        download.StatusCode.Should().Be(HttpStatusCode.OK);
+        var bytes = await download.Content.ReadAsByteArrayAsync();
+        bytes.Length.Should().BeGreaterThan(0);
+        bytes[0].Should().Be((byte)'P');
+        bytes[1].Should().Be((byte)'K');
+    }
+
+    [Fact]
+    public async Task Download_token_requires_authentication()
+    {
+        var client = CreateAuthenticated();
+        using var sandbox = TempDir.Create();
+        File.WriteAllText(Path.Combine(sandbox.Path, "index.html"), "<html></html>");
+        using var output = TempDir.Create();
+        var response = await client.PostAsJsonAsync("/api/v1/generate", new
+        {
+            path = sandbox.Path,
+            outputDirectory = output.Path,
+            returnDownloadToken = true
+        });
+        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var url = json.GetProperty("downloadUrl").GetString()!;
+
+        var anon = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false
+        });
+        var denied = await anon.GetAsync(url);
+        denied.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Found, HttpStatusCode.Redirect);
     }
 
     [Fact]

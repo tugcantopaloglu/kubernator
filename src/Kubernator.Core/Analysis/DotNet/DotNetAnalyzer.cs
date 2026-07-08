@@ -174,7 +174,7 @@ public sealed class DotNetAnalyzer : IAppAnalyzer
             entry = new EntryPoint
             {
                 Path = layout.AppHostPath,
-                AssemblyName = assembly?.AssemblyName,
+                AssemblyName = assembly?.AssemblyName ?? Path.GetFileNameWithoutExtension(layout.MainAssemblyPath ?? layout.AppHostPath),
                 StartupCommand = $"./{Path.GetFileName(layout.AppHostPath)}",
                 Arguments = []
             };

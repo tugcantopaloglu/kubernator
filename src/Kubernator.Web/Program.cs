@@ -110,6 +110,9 @@ try
             .AddAuthenticationSchemes(ApiKeyOptions.SchemeName)
             .RequireAuthenticatedUser()
             .Requirements.Add(new ScopeRequirement(ApiKeyScope.Admin)));
+        options.AddPolicy(ApiKeyScopes.DownloadPolicy, policy => policy
+            .AddAuthenticationSchemes(CookieAuthenticationDefaults.AuthenticationScheme, ApiKeyOptions.SchemeName)
+            .RequireAuthenticatedUser());
     });
 
     builder.Services.AddRateLimiter(options =>
@@ -391,7 +394,7 @@ try
 
     app.MapControllers();
 
-    app.MapGet("/download/{token}", [Authorize] (string token, ArtifactRegistry registry) =>
+    app.MapGet("/download/{token}", [Authorize(Policy = ApiKeyScopes.DownloadPolicy)] (string token, ArtifactRegistry registry) =>
     {
         var entry = registry.Resolve(token);
         if (entry is null || !File.Exists(entry.FilePath))

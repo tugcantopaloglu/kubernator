@@ -232,11 +232,30 @@ public sealed class UpdateService : IUpdateService
 
     private static async Task<ReleaseManifest> ParseManifestAsync(Stream stream, CancellationToken ct)
     {
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-        var root = doc.RootElement;
+        JsonDocument doc;
+        try
+        {
+            doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException($"release manifest is not valid JSON: {ex.Message}", ex);
+        }
 
-        var version = root.GetProperty("version").GetString()
-            ?? throw new InvalidOperationException("manifest missing 'version'");
+        using (doc)
+        {
+            return ParseManifest(doc.RootElement);
+        }
+    }
+
+    private static ReleaseManifest ParseManifest(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("release manifest must be a JSON object");
+        }
+
+        var version = RequiredString(root, "version");
         var publishedAt = root.TryGetProperty("publishedAt", out var paProp) && paProp.ValueKind == JsonValueKind.String
             ? DateTimeOffset.Parse(paProp.GetString()!, CultureInfo.InvariantCulture)
             : DateTimeOffset.UtcNow;
@@ -248,11 +267,16 @@ public sealed class UpdateService : IUpdateService
         {
             foreach (var item in arr.EnumerateArray())
             {
+                if (item.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidOperationException("each entry in 'artifacts' must be a JSON object");
+                }
+
                 artifacts.Add(new ReleaseArtifact
                 {
-                    RuntimeIdentifier = item.GetProperty("rid").GetString() ?? string.Empty,
-                    Url = item.GetProperty("url").GetString() ?? string.Empty,
-                    Sha256 = item.GetProperty("sha256").GetString() ?? string.Empty,
+                    RuntimeIdentifier = RequiredString(item, "rid"),
+                    Url = RequiredString(item, "url"),
+                    Sha256 = RequiredString(item, "sha256"),
                     SizeBytes = item.TryGetProperty("size", out var s) && s.TryGetInt64(out var size) ? size : 0,
                     FileName = item.TryGetProperty("fileName", out var fn) ? fn.GetString() : null
                 });
@@ -272,6 +296,20 @@ public sealed class UpdateService : IUpdateService
             Notes = notes,
             MinimumUpgradableFrom = minFrom
         };
+    }
+
+    private static string RequiredString(JsonElement obj, string name)
+    {
+        if (!obj.TryGetProperty(name, out var prop) || prop.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException($"release manifest is missing required string field '{name}'");
+        }
+        var value = prop.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException($"release manifest field '{name}' must not be empty");
+        }
+        return value;
     }
 
     public static string CurrentRuntimeIdentifier()

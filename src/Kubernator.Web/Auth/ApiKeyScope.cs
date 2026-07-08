@@ -12,6 +12,7 @@ public static class ApiKeyScopes
     public const string ReadPolicy = "ApiKeyRead";
     public const string GeneratePolicy = "ApiKeyGenerate";
     public const string AdminPolicy = "ApiKeyAdmin";
+    public const string DownloadPolicy = "DownloadCookieOrApiKey";
 
     public const string ScopeClaimType = "kubernator_scope";
     public const string KeyIdClaimType = "kubernator_key_id";
