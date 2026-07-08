@@ -85,14 +85,16 @@ jobs:
               --namespace ci \
               --probe-path /health \
               --probe-port 8080 \
-              --ready-timeout 180
+              --ready-timeout 180 \
+              --keep-cluster
 
       - name: diagnostics on failure
         if: failure()
         run: |
-          kubectl --context kind-kubernator-e2e get all -A || true
+          kubectl --context kind-kubernator-e2e get all -n ci -o wide || true
           kubectl --context kind-kubernator-e2e describe pods -n ci || true
-          kubectl --context kind-kubernator-e2e logs -n ci -l app.kubernetes.io/managed-by=kubernator --tail=100 || true
+          kubectl --context kind-kubernator-e2e get events -n ci --sort-by=.lastTimestamp || true
+          kubectl --context kind-kubernator-e2e logs -n ci -l app.kubernetes.io/managed-by=kubernator --tail=200 --all-containers || true
 
       - name: tear down kind cluster
         if: always()
