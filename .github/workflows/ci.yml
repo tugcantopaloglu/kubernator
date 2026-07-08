@@ -43,3 +43,57 @@ jobs:
           path: "**/TestResults/**/*"
           if-no-files-found: warn
           retention-days: 7
+
+  validate-e2e:
+    name: validate on kind
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: install kind
+        run: |
+          curl -fsSLo ./kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          kind version
+
+      - name: preflight (docker + kubectl + kind on PATH)
+        run: |
+          docker version
+          kubectl version --client
+          kind version
+
+      - name: build cli
+        run: dotnet build src/Kubernator.Cli --configuration Release
+
+      - name: stage a static site with a /health endpoint
+        run: |
+          mkdir -p site
+          echo '<!doctype html><title>ci</title><h1>kubernator ci</h1>' > site/index.html
+          printf 'ok' > site/health
+
+      - name: validate end-to-end on a kind cluster
+        run: |
+          dotnet run --project src/Kubernator.Cli --configuration Release --no-build -- \
+            validate ./site \
+              --cluster kubernator-e2e \
+              --namespace ci \
+              --probe-path /health \
+              --probe-port 8080 \
+              --ready-timeout 180
+
+      - name: diagnostics on failure
+        if: failure()
+        run: |
+          kubectl --context kind-kubernator-e2e get all -A || true
+          kubectl --context kind-kubernator-e2e describe pods -n ci || true
+          kubectl --context kind-kubernator-e2e logs -n ci -l app.kubernetes.io/managed-by=kubernator --tail=100 || true
+
+      - name: tear down kind cluster
+        if: always()
+        run: kind delete cluster --name kubernator-e2e || true

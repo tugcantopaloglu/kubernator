@@ -97,4 +97,67 @@ public sealed class UpdateServiceTests : IDisposable
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .Which.Message.Should().Contain("version");
     }
+
+    private (string manifestPath, byte[] payload, string sha) StageLocalRelease(string rid, string? sha256Override = null)
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes("brand new kubernator build " + Guid.NewGuid().ToString("N"));
+        var artifactPath = Path.Combine(scratch, "kubernator-new.bin");
+        File.WriteAllBytes(artifactPath, payload);
+        var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload)).ToLowerInvariant();
+        var manifest = $$"""
+        {
+          "version": "999.0.0",
+          "publishedAt": "2026-07-01T00:00:00Z",
+          "artifacts": [
+            { "rid": "{{rid}}", "url": "kubernator-new.bin", "sha256": "{{sha256Override ?? sha}}", "size": {{payload.Length}} }
+          ]
+        }
+        """;
+        var manifestPath = Path.Combine(scratch, "release.json");
+        File.WriteAllText(manifestPath, manifest);
+        return (manifestPath, payload, sha);
+    }
+
+    [Fact]
+    public async Task Apply_downloads_verifies_and_swaps_the_binary()
+    {
+        var (manifestPath, payload, sha) = StageLocalRelease("test-rid");
+        var target = Path.Combine(scratch, "kubernator.bin");
+        File.WriteAllText(target, "the old build");
+
+        var result = await sut.ApplyAsync(manifestPath, "test-rid", target, null);
+
+        File.ReadAllBytes(target).Should().Equal(payload);
+        result.ToVersion.Should().Be("999.0.0");
+        result.Sha256.Should().Be(sha);
+        File.Exists(result.OldExecutablePath).Should().BeTrue();
+        File.ReadAllText(result.OldExecutablePath).Should().Be("the old build");
+    }
+
+    [Fact]
+    public async Task Apply_rejects_a_sha256_mismatch_and_leaves_target_untouched()
+    {
+        var (manifestPath, _, _) = StageLocalRelease("test-rid",
+            sha256Override: "0000000000000000000000000000000000000000000000000000000000000000");
+        var target = Path.Combine(scratch, "kubernator.bin");
+        File.WriteAllText(target, "the old build");
+
+        var act = () => sut.ApplyAsync(manifestPath, "test-rid", target, null);
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("sha256 mismatch");
+        File.ReadAllText(target).Should().Be("the old build");
+    }
+
+    [Fact]
+    public async Task Apply_fails_when_no_artifact_matches_the_runtime()
+    {
+        var (manifestPath, _, _) = StageLocalRelease("linux-x64");
+        var target = Path.Combine(scratch, "kubernator.bin");
+        File.WriteAllText(target, "the old build");
+
+        var act = () => sut.ApplyAsync(manifestPath, "osx-arm64", target, null);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
 }

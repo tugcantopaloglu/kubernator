@@ -35,12 +35,18 @@ public sealed class SeverityClassifierTests
         SeverityClassifier.FromRaw(raw).Should().Be(expected);
     }
 
-    [Theory]
-    [InlineData("CVSS_V4:CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N")]
-    [InlineData("CVSS_V2:AV:N/AC:L/Au:N/C:C/I:C/A:C")]
-    public void Uncomputable_vector_is_unknown_not_downgraded_to_version_number(string raw)
+    [Fact]
+    public void Computes_cvss_v4_vector()
     {
-        SeverityClassifier.FromRaw(raw).Should().Be(Severity.Unknown);
+        SeverityClassifier.FromRaw("CVSS_V4:CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N")
+            .Should().Be(Severity.Critical);
+    }
+
+    [Fact]
+    public void Uncomputable_v2_vector_is_unknown_not_downgraded_to_version_number()
+    {
+        // A CVSS v2 vector we do not compute must not be misread as a low score.
+        SeverityClassifier.FromRaw("CVSS_V2:AV:N/AC:L/Au:N/C:C/I:C/A:C").Should().Be(Severity.Unknown);
     }
 
     [Fact]
