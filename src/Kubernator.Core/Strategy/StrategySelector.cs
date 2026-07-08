@@ -45,12 +45,24 @@ public sealed class StrategySelector : IStrategySelector
             Security = new SecurityHardening
             {
                 RunAsUser = baseImage.DefaultUserId,
-                RunAsGroup = baseImage.DefaultGroupId
+                RunAsGroup = baseImage.DefaultGroupId,
+                WritableMounts = ResolveWritableMounts(app)
             },
             Exposure = options?.Exposure,
             Platforms = NormalizePlatforms(options?.Platforms, app),
             Notes = baseImage.Notes is null ? [] : [baseImage.Notes]
         };
+    }
+
+    private static IReadOnlyList<string> ResolveWritableMounts(AppDescriptor app)
+    {
+        // The chiseled nginx base runs read-only, but nginx still needs to write
+        // its logs, temp bodies, and pid file. Provide those paths explicitly.
+        if (app.Kind == AppKind.StaticWeb)
+        {
+            return ["/tmp", "/var/lib/nginx/logs", "/var/lib/nginx/tmp", "/run"];
+        }
+        return ["/tmp"];
     }
 
     private static IReadOnlyList<string> NormalizePlatforms(IReadOnlyList<string>? requested, AppDescriptor app)

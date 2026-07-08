@@ -53,6 +53,23 @@ public sealed class StrategySelectorTests
     }
 
     [Fact]
+    public void Aspnet_app_only_makes_tmp_writable()
+    {
+        var plan = selector.Plan(SampleApp.AspNet());
+
+        plan.Security.WritableMounts.Should().Equal("/tmp");
+    }
+
+    [Fact]
+    public void Static_web_app_makes_nginx_runtime_paths_writable()
+    {
+        var plan = selector.Plan(SampleApp.StaticWeb());
+
+        plan.Security.ReadOnlyRootFilesystem.Should().BeTrue();
+        plan.Security.WritableMounts.Should().Contain(["/var/lib/nginx/logs", "/var/lib/nginx/tmp", "/run"]);
+    }
+
+    [Fact]
     public void Image_name_is_sanitized()
     {
         var app = SampleApp.AspNet() with
@@ -147,6 +164,31 @@ internal static class SampleApp
             AssemblyName = "myapp",
             StartupCommand = "./myapp",
             Arguments = []
+        }
+    };
+
+    public static AppDescriptor StaticWeb() => new()
+    {
+        SourcePath = "/tmp/site",
+        Kind = AppKind.StaticWeb,
+        Flavor = AppFlavor.StaticHtml,
+        Runtime = new RuntimeInfo
+        {
+            Name = "Nginx (static)",
+            PublishMode = PublishMode.SelfContained
+        },
+        Network = new NetworkInfo
+        {
+            Ports = [8080],
+            ListensHttp = true,
+            RequiresIngress = true
+        },
+        EntryPoint = new EntryPoint
+        {
+            Path = "/tmp/site",
+            AssemblyName = "site",
+            StartupCommand = "nginx",
+            Arguments = ["-g", "daemon off;"]
         }
     };
 }
