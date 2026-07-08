@@ -30,7 +30,7 @@ internal static class KubeadmConfigTemplate
             }
         }
         sb.AppendLine("networking:");
-        sb.AppendLine("  podSubnet: 10.244.0.0/16");
+        sb.AppendLine($"  podSubnet: {options.PodCidr}");
         return sb.ToString();
     }
 

@@ -1,6 +1,7 @@
 @page "/clusters"
 @rendermode InteractiveServer
 @inject Kubernator.Core.Deployment.IClusterApplier Applier
+@inject Kubernator.Core.ClusterProvisioning.Discovery.ClusterTopologyDiscoverer Discoverer
 
 <PageTitle>clusters · kubernator</PageTitle>
 
@@ -42,6 +43,88 @@
             }
         </ul>
     }
+</div>
+
+<div class="section">
+    <div class="section-head"><h2>discover topology</h2></div>
+    <p class="subtitle">reverse-map a running cluster into a <code>topology.json</code> for offline <a href="cluster">upgrades</a>. runs <code>kubectl get nodes</code> against a context and fills in a best-effort topology — SSH credentials and the artifact bundle path are applied uniformly and can be edited afterwards.</p>
+    <EditForm Model="@discover" OnValidSubmit="@HandleDiscover" class="form">
+        <div class="form-grid cols-3">
+            <div class="form-row">
+                <label for="dc-name">cluster name</label>
+                <InputText id="dc-name" @bind-Value="discover.ClusterName" placeholder="prod-eu" />
+            </div>
+            <div class="form-row">
+                <label for="dc-distro">distro</label>
+                <InputSelect id="dc-distro" @bind-Value="discover.Distro">
+                    <option value="rke2">rke2</option>
+                    <option value="k3s">k3s</option>
+                    <option value="kubeadm">kubeadm</option>
+                </InputSelect>
+            </div>
+            <div class="form-row">
+                <label for="dc-version">version</label>
+                <InputText id="dc-version" @bind-Value="discover.Version" placeholder="v1.30.4+rke2r1" />
+            </div>
+            <div class="form-row">
+                <label for="dc-user">SSH username</label>
+                <InputText id="dc-user" @bind-Value="discover.SshUsername" placeholder="root" />
+            </div>
+            <div class="form-row">
+                <label for="dc-port">SSH port</label>
+                <InputNumber id="dc-port" @bind-Value="discover.SshPort" />
+            </div>
+            <div class="form-row">
+                <label for="dc-ctx">kubectl context<span class="opt">  optional</span></label>
+                <InputText id="dc-ctx" @bind-Value="discover.Context" placeholder="(current context)" />
+            </div>
+            <div class="form-row span-2">
+                <label for="dc-fixed">fixed registration address(es)<span class="opt">  optional, comma-separated</span></label>
+                <InputText id="dc-fixed" @bind-Value="discover.FixedRegistrationAddresses" placeholder="lb.internal" />
+            </div>
+            <div class="form-row">
+                <label for="dc-bundle">artifact bundle path<span class="opt">  optional</span></label>
+                <InputText id="dc-bundle" @bind-Value="discover.BundlePath" />
+            </div>
+        </div>
+        <div class="row" style="gap:8px; margin-top:var(--s-3)">
+            <button class="btn btn-primary" type="submit" disabled="@discoverBusy">
+                @if (discoverBusy) { <span class="spinner"></span> }
+                else { <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg> }
+                <span>@(discoverBusy ? "discovering…" : "discover")</span>
+            </button>
+        </div>
+        @if (discoverMessage is not null)
+        {
+            <div class="banner @(discoverOk ? "info" : "err")">
+                <svg class="ico" width="16" height="16"><use href="#@(discoverOk ? "i-check2" : "i-x")" /></svg>
+                <div class="banner-body">@discoverMessage</div>
+            </div>
+        }
+        @foreach (var w in discoverWarnings)
+        {
+            <div class="banner warn"><svg class="ico" width="16" height="16"><use href="#i-x" /></svg><div class="banner-body">@w</div></div>
+        }
+        @if (discoveredNodes.Count > 0)
+        {
+            <ul class="file-list">
+                @foreach (var n in discoveredNodes)
+                {
+                    <li>
+                        <svg class="ico" width="14" height="14"><use href="#i-arrow-r" /></svg>
+                        <span class="path"><code>@n.Name</code></span>
+                        <span class="size">@n.Role.ToString().ToLowerInvariant()</span>
+                        @if (n.Connection.Host is { Length: > 0 } h) { <span class="size">@h</span> }
+                        @if (n.IsInitServer) { <span class="size">init</span> }
+                    </li>
+                }
+            </ul>
+            <div class="form-row span-2" style="margin-top:var(--s-2)">
+                <label for="dc-json">topology.json</label>
+                <textarea id="dc-json" rows="12" readonly style="width:100%; resize:vertical; font-family:var(--font-mono); font-size:var(--fs-12)" spellcheck="false">@discoveredJson</textarea>
+            </div>
+        }
+    </EditForm>
 </div>
 
 <div class="section">
@@ -139,6 +222,26 @@
         public bool SkipTlsVerify { get; set; }
     }
 
+    private sealed class DiscoverForm
+    {
+        public string ClusterName { get; set; } = string.Empty;
+        public string Distro { get; set; } = "rke2";
+        public string Version { get; set; } = string.Empty;
+        public string SshUsername { get; set; } = "root";
+        public int SshPort { get; set; } = 22;
+        public string? Context { get; set; }
+        public string? FixedRegistrationAddresses { get; set; }
+        public string? BundlePath { get; set; }
+    }
+
+    private readonly DiscoverForm discover = new();
+    private bool discoverBusy;
+    private bool discoverOk;
+    private string? discoverMessage;
+    private List<Kubernator.Core.ClusterProvisioning.Topology.NodeSpec> discoveredNodes = new();
+    private List<string> discoverWarnings = new();
+    private string discoveredJson = string.Empty;
+
     private readonly Form form = new();
     private bool useToken = true;
     private List<Kubernator.Core.Deployment.ClusterContext> contexts = new();
@@ -161,6 +264,65 @@
         catch (Exception ex)
         {
             contextsError = ex.Message;
+        }
+    }
+
+    private async Task HandleDiscover()
+    {
+        discoverMessage = null;
+        discoverWarnings = new();
+        discoveredNodes = new();
+        discoveredJson = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(discover.ClusterName) || string.IsNullOrWhiteSpace(discover.Version) || string.IsNullOrWhiteSpace(discover.SshUsername))
+        {
+            discoverOk = false;
+            discoverMessage = "cluster name, version, and SSH username are required";
+            return;
+        }
+        if (!Enum.TryParse<Kubernator.Core.ClusterProvisioning.Distros.DistroKind>(
+                discover.Distro switch { "rke2" => "Rke2", "k3s" => "K3s", "kubeadm" => "KubeadmNative", _ => discover.Distro }, out var distro))
+        {
+            discoverOk = false;
+            discoverMessage = $"unsupported distro: {discover.Distro}";
+            return;
+        }
+
+        discoverBusy = true;
+        try
+        {
+            var fixedAddresses = string.IsNullOrWhiteSpace(discover.FixedRegistrationAddresses)
+                ? Array.Empty<string>()
+                : discover.FixedRegistrationAddresses.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+            var result = await Discoverer.DiscoverAsync(new Kubernator.Core.ClusterProvisioning.Discovery.ClusterDiscoveryOptions
+            {
+                Context = string.IsNullOrWhiteSpace(discover.Context) ? null : discover.Context,
+                ClusterName = discover.ClusterName,
+                Distro = distro,
+                Version = discover.Version,
+                LocalArtifactBundlePath = string.IsNullOrWhiteSpace(discover.BundlePath) ? "REPLACE_WITH_LOCAL_ARTIFACT_BUNDLE_PATH" : discover.BundlePath,
+                SshUsername = discover.SshUsername,
+                SshPort = discover.SshPort,
+                FixedRegistrationAddresses = fixedAddresses
+            });
+
+            discoveredNodes = result.Topology.Nodes.ToList();
+            discoverWarnings = result.Warnings.ToList();
+            discoveredJson = Kubernator.Core.ClusterProvisioning.Topology.ClusterTopologyJson.Serialize(result.Topology);
+            discoverOk = result.Errors.Count == 0;
+            discoverMessage = discoverOk
+                ? $"discovered {discoveredNodes.Count} node(s) — copy the topology.json below"
+                : "discovered with validation errors: " + string.Join(" · ", result.Errors);
+        }
+        catch (Exception ex)
+        {
+            discoverOk = false;
+            discoverMessage = ex.Message;
+        }
+        finally
+        {
+            discoverBusy = false;
         }
     }
 

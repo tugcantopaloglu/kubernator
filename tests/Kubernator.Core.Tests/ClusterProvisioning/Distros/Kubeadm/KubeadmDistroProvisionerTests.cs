@@ -60,6 +60,105 @@ public sealed class KubeadmDistroProvisionerTests
     }
 
     [Fact]
+    public async Task BootstrapFirstServerAsync_does_not_patch_cni_manifest_for_default_pod_cidr()
+    {
+        var executor = CreateExecutorWithReadyResponder();
+        var sut = new KubeadmDistroProvisioner();
+
+        await sut.BootstrapFirstServerAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.4", new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10"
+        });
+
+        executor.ExecCalls.Should().NotContain(c => c.Command.CommandLine.Contains("sed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task BootstrapFirstServerAsync_patches_flannel_network_for_custom_pod_cidr()
+    {
+        var executor = CreateExecutorWithReadyResponder();
+        var sut = new KubeadmDistroProvisioner();
+
+        await sut.BootstrapFirstServerAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.4", new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10",
+            PodCidr = "172.20.0.0/16"
+        });
+
+        var patch = executor.ExecCalls.Should().ContainSingle(c => c.Command.CommandLine.Contains("sed", StringComparison.Ordinal)).Which;
+        patch.Command.CommandLine.Should().Contain("10.244.0.0/16");
+        patch.Command.CommandLine.Should().Contain("172.20.0.0/16");
+        patch.Command.CommandLine.Should().Contain("flannel.yaml");
+    }
+
+    [Fact]
+    public async Task BootstrapFirstServerAsync_patches_calico_pool_for_custom_pod_cidr()
+    {
+        var executor = CreateExecutorWithReadyResponder();
+        var sut = new KubeadmDistroProvisioner();
+
+        await sut.BootstrapFirstServerAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.4", new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10",
+            CniPlugin = "calico",
+            PodCidr = "172.20.0.0/16"
+        });
+
+        var patch = executor.ExecCalls.Should().ContainSingle(c => c.Command.CommandLine.Contains("sed", StringComparison.Ordinal)).Which;
+        patch.Command.CommandLine.Should().Contain("CALICO_IPV4POOL_CIDR");
+        patch.Command.CommandLine.Should().Contain("172.20.0.0/16");
+        patch.Command.CommandLine.Should().Contain("calico.yaml");
+    }
+
+    [Fact]
+    public async Task BootstrapFirstServerAsync_switches_calico_to_vxlan_when_requested()
+    {
+        var executor = CreateExecutorWithReadyResponder();
+        var sut = new KubeadmDistroProvisioner();
+
+        await sut.BootstrapFirstServerAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.4", new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10",
+            CniPlugin = "calico",
+            CalicoEncapsulation = "vxlan"
+        });
+
+        var patch = executor.ExecCalls.Should().ContainSingle(c => c.Command.CommandLine.Contains("calico_backend", StringComparison.Ordinal)).Which;
+        patch.Command.CommandLine.Should().Contain("calico_backend: \"vxlan\"");
+        patch.Command.CommandLine.Should().Contain("CALICO_IPV4POOL_VXLAN");
+    }
+
+    [Fact]
+    public async Task BootstrapFirstServerAsync_leaves_calico_in_bgp_mode_by_default()
+    {
+        var executor = CreateExecutorWithReadyResponder();
+        var sut = new KubeadmDistroProvisioner();
+
+        await sut.BootstrapFirstServerAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.4", new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10",
+            CniPlugin = "calico"
+        });
+
+        executor.ExecCalls.Should().NotContain(c => c.Command.CommandLine.Contains("calico_backend", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task JoinAdditionalServerAsync_uploads_join_config_with_control_plane_block()
     {
         var executor = CreateExecutorWithReadyResponder();
@@ -174,7 +273,7 @@ public sealed class KubeadmDistroProvisionerTests
         var executor = new RecordingNodeExecutor();
         var sut = new KubeadmDistroProvisioner();
 
-        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Agent);
+        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Agent, isInitServer: false);
 
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine.Contains("/usr/local/bin/kubeadm", StringComparison.Ordinal));
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine == "systemctl restart kubelet");
@@ -183,36 +282,24 @@ public sealed class KubeadmDistroProvisionerTests
     }
 
     [Fact]
-    public async Task UpgradeNodeAsync_for_server_role_runs_upgrade_apply_when_no_node_is_already_on_target_version()
+    public async Task UpgradeNodeAsync_on_init_server_runs_upgrade_apply_with_target_version()
     {
-        var executor = new RecordingNodeExecutor
-        {
-            Responder = call =>
-                call.Command.CommandLine.Contains("kubeletVersion", StringComparison.Ordinal)
-                    ? new NodeExecOutcome { ExitCode = 0, StandardOutput = "v1.30.4", StandardError = "", Duration = TimeSpan.Zero }
-                    : new NodeExecOutcome { ExitCode = 0, StandardOutput = "READY", StandardError = "", Duration = TimeSpan.Zero }
-        };
+        var executor = CreateExecutorWithReadyResponder();
         var sut = new KubeadmDistroProvisioner();
 
-        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Server);
+        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Server, isInitServer: true);
 
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine.Contains("kubeadm upgrade apply", StringComparison.Ordinal) && c.Command.CommandLine.Contains("v1.30.5", StringComparison.Ordinal));
         executor.ExecCalls.Should().NotContain(c => c.Command.CommandLine == "kubeadm upgrade node");
     }
 
     [Fact]
-    public async Task UpgradeNodeAsync_for_server_role_runs_upgrade_node_when_another_node_is_already_on_target_version()
+    public async Task UpgradeNodeAsync_on_non_init_server_runs_upgrade_node()
     {
-        var executor = new RecordingNodeExecutor
-        {
-            Responder = call =>
-                call.Command.CommandLine.Contains("kubeletVersion", StringComparison.Ordinal)
-                    ? new NodeExecOutcome { ExitCode = 0, StandardOutput = "v1.30.4 v1.30.5", StandardError = "", Duration = TimeSpan.Zero }
-                    : new NodeExecOutcome { ExitCode = 0, StandardOutput = "READY", StandardError = "", Duration = TimeSpan.Zero }
-        };
+        var executor = CreateExecutorWithReadyResponder();
         var sut = new KubeadmDistroProvisioner();
 
-        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Server);
+        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5", NodeRole.Server, isInitServer: false);
 
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine == "kubeadm upgrade node");
         executor.ExecCalls.Should().NotContain(c => c.Command.CommandLine.Contains("upgrade apply", StringComparison.Ordinal));

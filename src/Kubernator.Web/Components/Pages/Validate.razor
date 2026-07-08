@@ -5,6 +5,7 @@
 @inject IGenerationService Generation
 @inject IContainerEngineProvider EngineProvider
 @inject Kubernator.Core.Validation.IValidator Validator
+@inject Kubernator.Web.Ui.UiActionGateway Gateway
 
 <PageTitle>validate · kubernator</PageTitle>
 
@@ -201,7 +202,7 @@
             }
 
             var probePort = plan.ExposedPorts.Count > 0 ? plan.ExposedPorts[0] : (int?)null;
-            result = await Validator.ValidateAsync(new Kubernator.Core.Validation.ValidationOptions
+            var validationOptions = new Kubernator.Core.Validation.ValidationOptions
             {
                 ManifestsDirectory = staging,
                 ImageReference = plan.FullImageReference,
@@ -212,7 +213,10 @@
                 ReuseExistingCluster = form.ReuseCluster,
                 HttpProbePath = string.IsNullOrWhiteSpace(form.ProbePath) ? null : form.ProbePath,
                 HttpProbePort = probePort
-            }, progress);
+            };
+            // Creating/using a kind cluster is a cluster-affecting action, so route it through the
+            // same audit + per-session rate-limit gateway the REST API and other cluster pages use.
+            result = await Gateway.InvokeAsync("validate", ct => Validator.ValidateAsync(validationOptions, progress, ct));
         }
         catch (Exception ex)
         {

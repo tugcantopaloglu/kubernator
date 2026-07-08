@@ -165,6 +165,7 @@
 }
 .banner.info { border-left-color: var(--info); }
 .banner.err { border-left-color: var(--err); }
+.banner.warn { border-left-color: var(--warn); }
 .banner .ico { color: var(--warn); margin-top: 2px; flex: 0 0 16px; }
 .banner.info .ico { color: var(--info); }
 .banner.err .ico { color: var(--err); }

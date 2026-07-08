@@ -188,7 +188,7 @@ src/
   Kubernator.Core      detection, strategy selection, generators, bundling, vuln scan
   Kubernator.Runtime   container engine adapters (Docker / Podman / containerd via CLI)
   Kubernator.Cli       Spectre.Console CLI surface
-  Kubernator.Web       Blazor Server UI (early; mirrors the CLI)
+  Kubernator.Web       Blazor Server UI + REST API (mirrors the CLI, with API-key auth)
 tests/
   Kubernator.Core.Tests
   Kubernator.Cli.Tests

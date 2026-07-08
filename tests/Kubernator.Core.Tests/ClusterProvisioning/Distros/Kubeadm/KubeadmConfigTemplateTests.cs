@@ -25,6 +25,24 @@ public sealed class KubeadmConfigTemplateTests
         yaml.Should().Contain("- cluster.internal");
         yaml.Should().NotContain("discovery:");
         yaml.Should().NotContain("kind: JoinConfiguration");
+        yaml.Should().Contain("podSubnet: 10.244.0.0/16", because: "the default pod CIDR is used when none is specified");
+    }
+
+    [Fact]
+    public void RenderInit_uses_the_configured_pod_cidr()
+    {
+        var yaml = KubeadmConfigTemplate.RenderInit(new ServerBootstrapOptions
+        {
+            ClusterName = "demo",
+            Version = "v1.30.4",
+            TlsSans = ["10.0.0.10"],
+            AdvertiseAddress = "10.0.0.10",
+            PodCidr = "192.168.0.0/16",
+            IsFirstServer = true
+        });
+
+        yaml.Should().Contain("podSubnet: 192.168.0.0/16");
+        yaml.Should().NotContain("10.244.0.0/16");
     }
 
     [Fact]

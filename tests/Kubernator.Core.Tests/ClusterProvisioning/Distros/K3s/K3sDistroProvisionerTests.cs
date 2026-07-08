@@ -119,7 +119,7 @@ public sealed class K3sDistroProvisionerTests
         var executor = new RecordingNodeExecutor();
         var sut = new K3sDistroProvisioner();
 
-        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5+k3s1", NodeRole.Agent);
+        await sut.UpgradeNodeAsync(Connection, executor, "/opt/kubernator/artifacts/v1.30.5+k3s1", NodeRole.Agent, isInitServer: false);
 
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine == "systemctl stop k3s-agent");
         executor.ExecCalls.Should().Contain(c => c.Command.CommandLine.Contains("INSTALL_K3S_EXEC=agent", StringComparison.Ordinal));

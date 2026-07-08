@@ -216,9 +216,10 @@ public sealed class K3sDistroProvisioner : IClusterDistroProvisioner
     }
 
     public async Task UpgradeNodeAsync(
-        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role,
+        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role, bool isInitServer,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        _ = isInitServer; // k3s upgrades each node symmetrically; no distinct init-server step.
         var serviceName = role == NodeRole.Server ? "k3s" : "k3s-agent";
         var installType = role == NodeRole.Server ? "server" : "agent";
 

@@ -42,6 +42,85 @@ public sealed class ClusterTopologyValidatorTests
     }
 
     [Fact]
+    public void Custom_valid_pod_cidr_passes()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            CniPlugin = "flannel",
+            PodCidr = "172.20.0.0/16",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Errors.Should().NotContain(e => e.Contains("podCidr"));
+    }
+
+    [Fact]
+    public void Invalid_pod_cidr_is_an_error()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            CniPlugin = "flannel",
+            PodCidr = "not-a-cidr",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Ok.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("podCidr"));
+    }
+
+    [Fact]
+    public void Invalid_calico_encapsulation_is_an_error()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            CniPlugin = "calico",
+            CalicoEncapsulation = "ipsec",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Ok.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("calicoEncapsulation"));
+    }
+
+    [Fact]
+    public void Vxlan_encapsulation_with_non_calico_cni_warns()
+    {
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.KubeadmNative,
+            Version = "v1.30.4",
+            CniPlugin = "flannel",
+            CalicoEncapsulation = "vxlan",
+            Nodes = [Server("m1", isInit: true), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var result = ClusterTopologyValidator.Validate(topology);
+
+        result.Ok.Should().BeTrue();
+        result.Warnings.Should().Contain(w => w.Contains("vxlan"));
+    }
+
+    [Fact]
     public void Empty_topology_is_an_error()
     {
         var topology = new ClusterTopology

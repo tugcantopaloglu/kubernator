@@ -131,6 +131,62 @@ public sealed class ClusterApiTests
     }
 
     [Fact]
+    public async Task Discover_without_api_key_is_unauthorized()
+    {
+        var client = factory.CreateClient();
+        var response = await client.PostAsJsonAsync("/api/v1/cluster/discover", new
+        {
+            clusterName = "demo",
+            version = "v1.30.4+rke2r1",
+            sshUsername = "root"
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Discover_missing_cluster_name_returns_400()
+    {
+        var client = ClientWithKey(ApiTests.Factory.TestApiKey);
+        var response = await client.PostAsJsonAsync("/api/v1/cluster/discover", new
+        {
+            clusterName = "",
+            version = "v1.30.4+rke2r1",
+            sshUsername = "root"
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Discover_rejects_unsupported_distro()
+    {
+        var client = ClientWithKey(ApiTests.Factory.TestApiKey);
+        var response = await client.PostAsJsonAsync("/api/v1/cluster/discover", new
+        {
+            clusterName = "demo",
+            distro = "not-a-real-distro",
+            version = "v1.30.4+rke2r1",
+            sshUsername = "root"
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Discover_fails_gracefully_when_no_cluster_is_reachable()
+    {
+        var client = ClientWithKey(ApiTests.Factory.TestApiKey);
+        var response = await client.PostAsJsonAsync("/api/v1/cluster/discover", new
+        {
+            // A context that does not exist in any kubeconfig forces kubectl to fail,
+            // which the endpoint surfaces as a 400 rather than an unhandled 500.
+            context = "kubernator-tests-no-such-context-" + Guid.NewGuid().ToString("N"),
+            clusterName = "demo",
+            version = "v1.30.4+rke2r1",
+            sshUsername = "root"
+        });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
     public async Task Swagger_json_lists_cluster_endpoints()
     {
         var client = factory.CreateClient();
@@ -143,5 +199,6 @@ public sealed class ClusterApiTests
         paths.TryGetProperty("/api/v1/cluster/upgrade", out _).Should().BeTrue();
         paths.TryGetProperty("/api/v1/cluster/status", out _).Should().BeTrue();
         paths.TryGetProperty("/api/v1/cluster/trust-host", out _).Should().BeTrue();
+        paths.TryGetProperty("/api/v1/cluster/discover", out _).Should().BeTrue();
     }
 }

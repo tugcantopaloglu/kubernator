@@ -75,6 +75,20 @@ public static class ClusterTopologyValidator
             errors.Add($"kubeadm topologies must set cniPlugin to 'flannel' or 'calico' (got '{topology.CniPlugin}')");
         }
 
+        if (!string.IsNullOrWhiteSpace(topology.PodCidr) && !System.Net.IPNetwork.TryParse(topology.PodCidr, out _))
+        {
+            errors.Add($"podCidr '{topology.PodCidr}' is not a valid CIDR (e.g. {ClusterNetworkDefaults.PodCidr})");
+        }
+
+        if (topology.CalicoEncapsulation is not ("bgp" or "vxlan"))
+        {
+            errors.Add($"calicoEncapsulation must be 'bgp' or 'vxlan' (got '{topology.CalicoEncapsulation}')");
+        }
+        else if (topology.CalicoEncapsulation == "vxlan" && topology.CniPlugin != "calico")
+        {
+            warnings.Add($"calicoEncapsulation 'vxlan' has no effect with cniPlugin '{topology.CniPlugin}'");
+        }
+
         foreach (var node in topology.Nodes)
         {
             if (node.Connection.Mode == Ssh.NodeConnectionMode.Ssh && string.IsNullOrWhiteSpace(node.Connection.Host))

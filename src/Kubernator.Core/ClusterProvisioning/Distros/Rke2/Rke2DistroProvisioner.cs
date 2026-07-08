@@ -217,9 +217,10 @@ public sealed class Rke2DistroProvisioner : IClusterDistroProvisioner
     }
 
     public async Task UpgradeNodeAsync(
-        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role,
+        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role, bool isInitServer,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
+        _ = isInitServer; // RKE2 upgrades each node symmetrically; no distinct init-server step.
         var serviceName = role == NodeRole.Server ? "rke2-server" : "rke2-agent";
         var installType = role == NodeRole.Server ? "server" : "agent";
 

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Kubernator.Core.ClusterProvisioning.Os;
 using Kubernator.Core.ClusterProvisioning.Ssh;
+using Kubernator.Core.ClusterProvisioning.Topology;
 
 namespace Kubernator.Core.ClusterProvisioning.Distros.Kubeadm;
 
@@ -219,12 +220,30 @@ public sealed class KubeadmDistroProvisioner : IClusterDistroProvisioner
         }
 
         var cniManifest = options.CniPlugin == "calico" ? "calico.yaml" : "flannel.yaml";
+        var manifestPath = $"{remoteArtifactDir}/cni/{cniManifest}";
+
+        // The vendored CNI manifests ship with the shipped defaults baked in; rewrite them in
+        // place only for the knobs the operator changed, leaving the default path byte-for-byte
+        // as before.
+        foreach (var patchCommand in BuildCniPatchCommands(options, manifestPath))
+        {
+            progress?.Report($"patching {options.CniPlugin} manifest");
+            var patchOutcome = await executor.ExecuteAsync(
+                connection,
+                new NodeCommand { CommandLine = patchCommand, UseSudo = true, Timeout = TimeSpan.FromSeconds(30) },
+                progress, ct);
+            if (!patchOutcome.Ok)
+            {
+                throw new InvalidOperationException($"failed to patch CNI manifest: {patchOutcome.StandardError}");
+            }
+        }
+
         progress?.Report($"applying {options.CniPlugin} CNI manifest");
         var applyOutcome = await executor.ExecuteAsync(
             connection,
             new NodeCommand
             {
-                CommandLine = $"kubectl --kubeconfig {KubeconfigPath} apply -f {ShellCommand.Quote($"{remoteArtifactDir}/cni/{cniManifest}")}",
+                CommandLine = $"kubectl --kubeconfig {KubeconfigPath} apply -f {ShellCommand.Quote(manifestPath)}",
                 UseSudo = true,
                 Timeout = TimeSpan.FromMinutes(2)
             },
@@ -362,7 +381,7 @@ public sealed class KubeadmDistroProvisioner : IClusterDistroProvisioner
     }
 
     public async Task UpgradeNodeAsync(
-        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role,
+        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role, bool isInitServer,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
         await UploadUpgradedBinariesAsync(connection, executor, remoteArtifactDir, progress, ct);
@@ -379,14 +398,16 @@ public sealed class KubeadmDistroProvisioner : IClusterDistroProvisioner
             return;
         }
 
+        // The init control-plane node drives the cluster-wide upgrade with `kubeadm upgrade apply`
+        // (run exactly once); every other control-plane node then reconciles with `kubeadm upgrade node`.
+        // The caller guarantees the init server is upgraded first (see ClusterUpgradePlanner ordering).
         var targetVersion = ExtractVersionFromArtifactDir(remoteArtifactDir);
-        var alreadyApplied = await IsVersionAlreadyLiveAsync(connection, executor, targetVersion, ct);
 
-        var upgradeCommand = alreadyApplied
-            ? "kubeadm upgrade node"
-            : $"kubeadm upgrade apply {ShellCommand.Quote(targetVersion)} -y";
+        var upgradeCommand = isInitServer
+            ? $"kubeadm upgrade apply {ShellCommand.Quote(targetVersion)} -y"
+            : "kubeadm upgrade node";
 
-        progress?.Report(alreadyApplied ? "running kubeadm upgrade node" : "running kubeadm upgrade apply");
+        progress?.Report(isInitServer ? "running kubeadm upgrade apply" : "running kubeadm upgrade node");
         var upgradeOutcome = await executor.ExecuteAsync(
             connection, new NodeCommand { CommandLine = upgradeCommand, UseSudo = true, Timeout = TimeSpan.FromMinutes(10) }, progress, ct);
         if (!upgradeOutcome.Ok)
@@ -430,25 +451,37 @@ public sealed class KubeadmDistroProvisioner : IClusterDistroProvisioner
     private static string ExtractVersionFromArtifactDir(string remoteArtifactDir) =>
         remoteArtifactDir[(remoteArtifactDir.LastIndexOf('/') + 1)..];
 
-    private static async Task<bool> IsVersionAlreadyLiveAsync(NodeConnection connection, INodeExecutor executor, string targetVersion, CancellationToken ct)
+    // Builds the in-place `sed` edits that reconcile the vendored CNI manifest with the topology.
+    // Emits nothing for the shipped defaults, so the default install path is unchanged.
+    internal static IReadOnlyList<string> BuildCniPatchCommands(ServerBootstrapOptions options, string manifestPath)
     {
-        var outcome = await executor.ExecuteAsync(
-            connection,
-            new NodeCommand
-            {
-                CommandLine = $"kubectl --kubeconfig {KubeconfigPath} get nodes -o jsonpath='{{.items[*].status.nodeInfo.kubeletVersion}}' 2>/dev/null || true",
-                UseSudo = true,
-                Timeout = TimeSpan.FromSeconds(15)
-            },
-            null, ct);
-        if (!outcome.Ok)
+        var quotedPath = ShellCommand.Quote(manifestPath);
+        var commands = new List<string>();
+
+        var customCidr = !string.Equals(options.PodCidr, ClusterNetworkDefaults.PodCidr, StringComparison.Ordinal);
+        if (customCidr)
         {
-            return false;
+            // Flannel: rewrite the canonical 10.244.0.0/16 in net-conf.json's "Network".
+            // Calico: uncomment and set the CALICO_IPV4POOL_CIDR env var (default 192.168.0.0/16).
+            commands.Add(options.CniPlugin == "calico"
+                ? $"sed -i -e 's|# - name: CALICO_IPV4POOL_CIDR|- name: CALICO_IPV4POOL_CIDR|' " +
+                  $"-e 's|#   value: \"192.168.0.0/16\"|  value: \"{options.PodCidr}\"|' {quotedPath}"
+                : $"sed -i 's|{ClusterNetworkDefaults.PodCidr}|{options.PodCidr}|g' {quotedPath}");
         }
 
-        return outcome.StandardOutput
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(v => string.Equals(v, targetVersion, StringComparison.Ordinal));
+        // Calico defaults to a BGP (BIRD) backend with IPIP encapsulation. Switching to VXLAN
+        // disables BIRD (calico_backend) and flips the default IP pool's encapsulation env vars.
+        // The `{n;s}` sed ranges edit the value line that follows each env-var name line, so the
+        // substitution can't accidentally hit an unrelated "Never"/"Always" elsewhere.
+        if (options.CniPlugin == "calico" && string.Equals(options.CalicoEncapsulation, "vxlan", StringComparison.OrdinalIgnoreCase))
+        {
+            commands.Add(
+                $"sed -i -e 's|calico_backend: \"bird\"|calico_backend: \"vxlan\"|' " +
+                $"-e '/name: CALICO_IPV4POOL_VXLAN/{{n;s/\"Never\"/\"Always\"/}}' " +
+                $"-e '/name: CALICO_IPV4POOL_IPIP/{{n;s/\"Always\"/\"Never\"/}}' {quotedPath}");
+        }
+
+        return commands;
     }
 
     private static (string BootstrapToken, string CaCertHash) ParseJoinCommand(string output)

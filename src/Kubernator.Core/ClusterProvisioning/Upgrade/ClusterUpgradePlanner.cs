@@ -25,8 +25,11 @@ public sealed class ClusterUpgradePlanner
             throw new NotSupportedException($"no provisioner registered for distro '{topology.Distro}'");
         }
 
+        // The init control-plane node must be upgraded first: kubeadm's cluster-wide
+        // `upgrade apply` runs there once, and only afterwards can the remaining
+        // control-plane nodes reconcile with `upgrade node`. Servers precede agents.
         var ordered = topology.Nodes
-            .Where(n => n.Role == NodeRole.Server)
+            .Where(n => n.Role == NodeRole.Server).OrderByDescending(n => n.IsInitServer)
             .Concat(topology.Nodes.Where(n => n.Role == NodeRole.Agent));
 
         var steps = new List<NodeUpgradeStep>();

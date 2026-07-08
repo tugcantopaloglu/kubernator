@@ -1,4 +1,5 @@
 using Kubernator.Core.ClusterProvisioning;
+using Kubernator.Core.ClusterProvisioning.Discovery;
 using Kubernator.Core.ClusterProvisioning.Distros;
 using Kubernator.Core.ClusterProvisioning.Ssh;
 using Kubernator.Core.ClusterProvisioning.Topology;
@@ -16,11 +17,13 @@ namespace Kubernator.Web.Api.Controllers;
 public sealed class ClusterController : ControllerBase
 {
     private readonly IJobManager jobs;
+    private readonly ClusterTopologyDiscoverer discoverer;
     private readonly ILogger<ClusterController> logger;
 
-    public ClusterController(IJobManager jobs, ILogger<ClusterController> logger)
+    public ClusterController(IJobManager jobs, ClusterTopologyDiscoverer discoverer, ILogger<ClusterController> logger)
     {
         this.jobs = jobs;
+        this.discoverer = discoverer;
         this.logger = logger;
     }
 
@@ -131,6 +134,72 @@ public sealed class ClusterController : ControllerBase
         var record = jobs.Enqueue("cluster-status", captured, keyId, keyName);
         logger.LogInformation("cluster status job {Id} submitted by key={KeyId} cluster={Cluster}", record.Id, keyId, topology.ClusterName);
         return Accepted($"/api/v1/jobs/{record.Id}", JobAccepted(record));
+    }
+
+    [HttpPost("discover")]
+    [Authorize(Policy = ApiKeyScopes.ReadPolicy)]
+    [ProducesResponseType(typeof(ClusterDiscoverResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ApiProblem), StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<ClusterDiscoverResponse>> Discover([FromBody] ClusterDiscoverRequest request, CancellationToken ct)
+    {
+        var clusterName = ApiPathHelpers.RequireField(request?.ClusterName, "clusterName");
+        var version = ApiPathHelpers.RequireField(request!.Version, "version");
+        var username = ApiPathHelpers.RequireField(request.SshUsername, "sshUsername");
+        if (!ClusterDistroParsing.TryParse(request.Distro, out var distro))
+        {
+            throw ApiException.BadRequest($"unsupported distro: {request.Distro}");
+        }
+
+        ClusterDiscoveryResult result;
+        try
+        {
+            result = await discoverer.DiscoverAsync(new ClusterDiscoveryOptions
+            {
+                Context = string.IsNullOrWhiteSpace(request.Context) ? null : request.Context,
+                ClusterName = clusterName,
+                Distro = distro,
+                Version = version,
+                LocalArtifactBundlePath = string.IsNullOrWhiteSpace(request.LocalArtifactBundlePath)
+                    ? "REPLACE_WITH_LOCAL_ARTIFACT_BUNDLE_PATH"
+                    : request.LocalArtifactBundlePath,
+                SshUsername = username,
+                SshPrivateKeyVaultId = request.SshPrivateKeyVaultId,
+                SshPrivateKeyPath = request.SshPrivateKeyPath,
+                SshPort = request.SshPort,
+                FixedRegistrationAddresses = request.FixedRegistrationAddresses
+            }, ct);
+        }
+        catch (Exception ex) when (ex is not ApiException)
+        {
+            throw ApiException.BadRequest("cluster discovery failed", ex.Message);
+        }
+
+        var topologyJson = ClusterTopologyJson.Serialize(result.Topology);
+        string? writtenTo = null;
+        if (!string.IsNullOrWhiteSpace(request.OutputPath))
+        {
+            writtenTo = Path.GetFullPath(request.OutputPath);
+            Directory.CreateDirectory(Path.GetDirectoryName(writtenTo)!);
+            await System.IO.File.WriteAllTextAsync(writtenTo, topologyJson, ct);
+        }
+
+        logger.LogInformation("cluster discover cluster={Cluster} nodes={Count} ok={Ok}", clusterName, result.Topology.Nodes.Count, result.Errors.Count == 0);
+        return Ok(new ClusterDiscoverResponse
+        {
+            ClusterName = clusterName,
+            TopologyOk = result.Errors.Count == 0,
+            Errors = result.Errors,
+            Warnings = result.Warnings,
+            Nodes = result.Topology.Nodes.Select(n => new ClusterDiscoverNodeDto
+            {
+                Name = n.Name,
+                Role = n.Role.ToString(),
+                Host = n.Connection.Host,
+                IsInitServer = n.IsInitServer
+            }).ToArray(),
+            TopologyJson = topologyJson,
+            WrittenTo = writtenTo
+        });
     }
 
     private static JobAcceptedResponse JobAccepted(JobRecord record) => new()

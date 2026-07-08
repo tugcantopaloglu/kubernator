@@ -5,6 +5,12 @@ using Kubernator.Core.ClusterProvisioning.Ssh;
 
 namespace Kubernator.Core.ClusterProvisioning.Topology;
 
+public static class ClusterNetworkDefaults
+{
+    /// <summary>Default pod network CIDR (Flannel's canonical default; also kubeadm's <c>podSubnet</c>).</summary>
+    public const string PodCidr = "10.244.0.0/16";
+}
+
 public sealed record NodeSpec
 {
     public required string Name { get; init; }
@@ -22,6 +28,9 @@ public sealed record ClusterTopology
     public required IReadOnlyList<NodeSpec> Nodes { get; init; }
     public IReadOnlyList<string> FixedRegistrationAddresses { get; init; } = [];
     public string CniPlugin { get; init; } = "canal";
+    public string PodCidr { get; init; } = ClusterNetworkDefaults.PodCidr;
+    /// <summary>Calico dataplane mode: <c>"bgp"</c> (default; BIRD + IPIP) or <c>"vxlan"</c>. Ignored for non-Calico CNIs.</summary>
+    public string CalicoEncapsulation { get; init; } = "bgp";
     public bool PermissiveFirewall { get; init; }
     public required string LocalArtifactBundlePath { get; init; }
 }

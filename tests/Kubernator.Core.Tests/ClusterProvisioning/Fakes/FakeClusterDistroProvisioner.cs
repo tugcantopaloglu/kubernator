@@ -89,10 +89,10 @@ internal sealed class FakeClusterDistroProvisioner : IClusterDistroProvisioner
     }
 
     public Task UpgradeNodeAsync(
-        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role,
+        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role, bool isInitServer,
         IProgress<string>? progress = null, CancellationToken ct = default)
     {
-        Record($"Upgrade:{HostOf(connection)}");
+        Record($"Upgrade:{HostOf(connection)}:{(isInitServer ? "init" : role.ToString().ToLowerInvariant())}");
         return Task.CompletedTask;
     }
 

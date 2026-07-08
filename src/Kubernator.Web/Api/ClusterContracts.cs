@@ -88,6 +88,46 @@ public sealed record ClusterStatusRequest
     public required string TopologyPath { get; init; }
 }
 
+public sealed record ClusterDiscoverRequest
+{
+    public string? Context { get; init; }
+    public required string ClusterName { get; init; }
+    public string Distro { get; init; } = "rke2";
+    public required string Version { get; init; }
+    public string? LocalArtifactBundlePath { get; init; }
+    public required string SshUsername { get; init; }
+    public string? SshPrivateKeyVaultId { get; init; }
+    public string? SshPrivateKeyPath { get; init; }
+    public int SshPort { get; init; } = 22;
+    public IReadOnlyList<string> FixedRegistrationAddresses { get; init; } = [];
+
+    /// <summary>Optional path to write the discovered topology JSON to, mirroring the CLI's <c>--output</c>.</summary>
+    public string? OutputPath { get; init; }
+}
+
+public sealed record ClusterDiscoverNodeDto
+{
+    public required string Name { get; init; }
+    public required string Role { get; init; }
+    public string? Host { get; init; }
+    public required bool IsInitServer { get; init; }
+}
+
+public sealed record ClusterDiscoverResponse
+{
+    public required string ClusterName { get; init; }
+    public required bool TopologyOk { get; init; }
+    public required IReadOnlyList<string> Errors { get; init; }
+    public required IReadOnlyList<string> Warnings { get; init; }
+    public required IReadOnlyList<ClusterDiscoverNodeDto> Nodes { get; init; }
+
+    /// <summary>The discovered topology serialized in the same canonical form the CLI writes.</summary>
+    public required string TopologyJson { get; init; }
+
+    /// <summary>Absolute path the topology was written to, when <c>OutputPath</c> was supplied.</summary>
+    public string? WrittenTo { get; init; }
+}
+
 public sealed record ClusterInstallResultDto
 {
     public required bool Ok { get; init; }

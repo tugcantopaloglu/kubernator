@@ -134,6 +134,8 @@ public sealed class ClusterProvisioningService : IClusterProvisioningService
                 TlsSans = tlsSans,
                 AdvertiseAddress = ResolveAddress(initNode),
                 CniPlugin = topology.CniPlugin,
+                PodCidr = topology.PodCidr,
+                CalicoEncapsulation = topology.CalicoEncapsulation,
                 PermissiveFirewall = topology.PermissiveFirewall,
                 IsFirstServer = true
             }, progress, ct);
@@ -152,6 +154,8 @@ public sealed class ClusterProvisioningService : IClusterProvisioningService
                     TlsSans = tlsSans,
                     AdvertiseAddress = ResolveAddress(server),
                     CniPlugin = topology.CniPlugin,
+                    PodCidr = topology.PodCidr,
+                    CalicoEncapsulation = topology.CalicoEncapsulation,
                     PermissiveFirewall = topology.PermissiveFirewall,
                     IsFirstServer = false,
                     JoinServerUrl = joinUrl,
@@ -282,7 +286,7 @@ public sealed class ClusterProvisioningService : IClusterProvisioningService
                     }, ct);
                 }
 
-                await provisioner.UpgradeNodeAsync(step.Node.Connection, executor, remoteDir, step.Node.Role, progress, ct);
+                await provisioner.UpgradeNodeAsync(step.Node.Connection, executor, remoteDir, step.Node.Role, step.Node.IsInitServer, progress, ct);
 
                 progress?.Report($"uncordoning {step.Node.Name}");
                 await processRunner.RunAsync(new ProcessInvocation

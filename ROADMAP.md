@@ -4,6 +4,30 @@ Working backlog of items identified during the offline Kubernetes cluster provis
 work (`src/Kubernator.Core/ClusterProvisioning/`) and the earlier codebase review.
 Not committed to any release; pick items up as needed.
 
+## Follow-through on previously-noted risks/deferrals
+
+- [x] **kubeadm upgrade init-server signal** — `IClusterDistroProvisioner.UpgradeNodeAsync` now
+  takes an explicit `isInitServer` flag instead of the kubelet-version self-detecting heuristic;
+  `ClusterUpgradePlanner` orders the init control-plane node first so `kubeadm upgrade apply`
+  runs there once and `kubeadm upgrade node` everywhere else. RKE2/k3s ignore the flag.
+- [x] **Configurable pod CIDR** — `ClusterTopology.PodCidr` (default `10.244.0.0/16`) replaces the
+  hard-coded `podSubnet`; the kubeadm provisioner rewrites the flannel `net-conf.json` Network /
+  Calico `CALICO_IPV4POOL_CIDR` to match, but only when a non-default CIDR is set (default path
+  unchanged). Validated as a real CIDR.
+- [x] **Calico VXLAN mode** — `ClusterTopology.CalicoEncapsulation` (`bgp` default | `vxlan`);
+  VXLAN flips `calico_backend` and the pool's VXLAN/IPIP env vars via targeted sed. Opt-in;
+  needs real-cluster verification against the shipped Calico manifest version.
+- [x] **`cluster discover` Web parity** — `POST /api/v1/cluster/discover` plus a "discover topology"
+  form on `Clusters.razor`, both mirroring the CLI's reverse-mapping and returning the canonical
+  `topology.json`. Covered by API tests and the first bUnit component tests (see below).
+- [x] **Validate through the UI action gateway** — `Validate.razor`'s kind-cluster run now goes
+  through `UiActionGateway` for audit + per-session rate limiting, like the other cluster-affecting
+  pages. (The Jobs-UI rollout to Build/Bundle/Validate remains open: their durable job handlers
+  deliberately do less than the interactive pages — they assume prior generate/build — so swapping
+  the UI onto them is a behavior change needing product + browser verification, not a mechanical swap.)
+- [x] **bUnit harness** — `bunit` 2.7.2 added; `Components/ClustersPageTests.cs` renders the page
+  and drives the discover flow end-to-end. First Blazor component tests in the repo.
+
 ## Cluster provisioning — remaining distro/security work
 
 - [x] **kubeadm-native distro plugin** — `KubeadmDistroProvisioner` added under

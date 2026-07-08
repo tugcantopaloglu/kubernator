@@ -152,4 +152,31 @@ public sealed class ClusterUpgradePlannerTests
 
         plan.Steps.Select(s => s.Node.Name).Should().ContainInOrder("m1", "w1", "w2");
     }
+
+    [Fact]
+    public async Task Plan_orders_the_init_server_first_among_control_plane_nodes()
+    {
+        var executor = new RecordingNodeExecutor();
+        var osDetector = new FakeOsDetector();
+        var provisioner = new FakeClusterDistroProvisioner
+        {
+            VersionResponder = _ => new NodeVersionInfo { Installed = false }
+        };
+        var planner = new ClusterUpgradePlanner(executor, osDetector, [provisioner]);
+
+        var topology = new ClusterTopology
+        {
+            ClusterName = "demo",
+            Distro = DistroKind.Rke2,
+            Version = "v1",
+            Nodes = [Server("m1"), Server("m2", isInit: true), Server("m3"), Agent("w1")],
+            LocalArtifactBundlePath = "./bundle"
+        };
+
+        var plan = await planner.PlanAsync(topology, "v2");
+
+        plan.Steps[0].Node.Name.Should().Be("m2", because: "the init server drives kubeadm upgrade apply and must go first");
+        plan.Steps.Select(s => s.Node.Name).Should().ContainInOrder("m2", "w1");
+        plan.Steps[^1].Node.Role.Should().Be(NodeRole.Agent);
+    }
 }

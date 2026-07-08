@@ -23,6 +23,8 @@ public sealed record ServerBootstrapOptions
     public required IReadOnlyList<string> TlsSans { get; init; }
     public required string AdvertiseAddress { get; init; }
     public string CniPlugin { get; init; } = "canal";
+    public string PodCidr { get; init; } = "10.244.0.0/16";
+    public string CalicoEncapsulation { get; init; } = "bgp";
     public bool PermissiveFirewall { get; init; }
     public bool IsFirstServer { get; init; }
     public string? JoinServerUrl { get; init; }
@@ -79,7 +81,14 @@ public interface IClusterDistroProvisioner
 
     Task<NodeVersionInfo> GetInstalledVersionAsync(NodeConnection connection, INodeExecutor executor, CancellationToken ct = default);
 
+    /// <summary>
+    /// Upgrade a single node's control-plane/agent components to the version staged in
+    /// <paramref name="remoteArtifactDir"/>. <paramref name="isInitServer"/> identifies the one
+    /// control-plane node the cluster-wide upgrade must be driven from (kubeadm's
+    /// <c>upgrade apply</c> vs <c>upgrade node</c>); distros with a symmetric upgrade model
+    /// (RKE2/k3s) ignore it.
+    /// </summary>
     Task UpgradeNodeAsync(
-        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role,
+        NodeConnection connection, INodeExecutor executor, string remoteArtifactDir, NodeRole role, bool isInitServer,
         IProgress<string>? progress = null, CancellationToken ct = default);
 }
